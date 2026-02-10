@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stepper - Step-by-Step Support</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <h1>🎯 Stepper</h1>
+      <p class="subtitle">Step-by-step support assistant</p>
+    </header>
+
+    <!-- Search Section -->
+    <div id="searchSection" class="section">
+      <div class="input-group">
+        <label for="issueInput">What issue are you experiencing?</label>
+        <textarea 
+          id="issueInput" 
+          placeholder="Describe your issue here... (e.g., 'My email is not sending')"
+          rows="3"
+        ></textarea>
+      </div>
+      <button id="searchBtn" class="btn btn-primary">Find Solution</button>
+    </div>
+
+    <!-- No Results Message -->
+    <div id="noResultsSection" class="section hidden">
+      <div class="message-box message-warning">
+        <p><strong>No matching solution found</strong></p>
+        <p>Please try describing your issue differently or contact support for assistance.</p>
+      </div>
+      <button id="tryAgainBtn" class="btn btn-secondary">Try Again</button>
+    </div>
+
+    <!-- Solution Overview -->
+    <div id="solutionSection" class="section hidden">
+      <div class="message-box message-success">
+        <h2 id="solutionTitle"></h2>
+        <p id="solutionSummary"></p>
+        <p class="step-count" id="stepCount"></p>
+      </div>
+      <button id="startBtn" class="btn btn-primary">Start Steps</button>
+      <button id="backToSearchBtn" class="btn btn-secondary">Search Again</button>
+    </div>
+
+    <!-- Step Navigation -->
+    <div id="stepSection" class="section hidden">
+      <div class="step-header">
+        <span class="step-number" id="stepNumber">Step 1 of 5</span>
+        <h3 id="stepTitle"></h3>
+      </div>
+      
+      <div class="step-content">
+        <p id="stepText"></p>
+      </div>
+
+      <div class="progress-bar">
+        <div id="progressFill" class="progress-fill"></div>
+      </div>
+
+      <div class="button-group">
+        <button id="backBtn" class="btn btn-secondary" disabled>
+          ← Back
+        </button>
+        <button id="continueBtn" class="btn btn-primary">
+          Continue →
+        </button>
+      </div>
+
+      <div class="action-buttons">
+        <button id="didntWorkBtn" class="btn btn-outline">
+          ⚠️ This didn't work
+        </button>
+        <button id="fullArticleBtn" class="btn btn-outline">
+          📄 Open full article
+        </button>
+        <button id="resetBtn" class="btn btn-outline">
+          🔄 Reset
+        </button>
+      </div>
+    </div>
+
+    <!-- Full Article View -->
+    <div id="fullArticleSection" class="section hidden">
+      <div class="article-header">
+        <h2 id="articleTitle"></h2>
+        <p id="articleSummary"></p>
+      </div>
+      
+      <div class="article-content">
+        <h3>All Steps:</h3>
+        <ol id="articleSteps"></ol>
+      </div>
+
+      <div class="button-group">
+        <button id="backToStepsBtn" class="btn btn-primary">
+          ← Back to Steps
+        </button>
+        <button id="closeArticleBtn" class="btn btn-secondary">
+          Search Again
+        </button>
+      </div>
+    </div>
+
+    <!-- Feedback Section -->
+    <div id="feedbackSection" class="section hidden">
+      <div class="message-box message-info">
+        <h3>We're sorry this didn't work</h3>
+        <p>Your feedback helps us improve our support articles.</p>
+        <textarea 
+          id="feedbackText" 
+          placeholder="Tell us what went wrong or what you expected..."
+          rows="4"
+        ></textarea>
+      </div>
+      
+      <div class="button-group">
+        <button id="submitFeedbackBtn" class="btn btn-primary">
+          Submit Feedback
+        </button>
+        <button id="cancelFeedbackBtn" class="btn btn-secondary">
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <!-- Feedback Success -->
+    <div id="feedbackSuccessSection" class="section hidden">
+      <div class="message-box message-success">
+        <h3>✓ Thank you for your feedback!</h3>
+        <p>We'll use this to improve our support articles.</p>
+      </div>
+      <div class="button-group">
+        <button id="continueFeedbackBtn" class="btn btn-primary">
+          Continue with Steps
+        </button>
+        <button id="newSearchBtn" class="btn btn-secondary">
+          New Search
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>
