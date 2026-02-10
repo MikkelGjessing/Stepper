@@ -350,6 +350,109 @@ body {
   animation: fadeIn 0.3s ease;
 }
 
+/* Article Selection */
+.selection-title {
+  font-size: 18px;
+  margin-bottom: 16px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.article-matches {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.article-card {
+  background: var(--bg-color);
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.article-card:hover {
+  border-color: var(--primary-color);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+.article-card.top-match {
+  border-color: var(--primary-color);
+  background: linear-gradient(to right, var(--bg-color), #eef2ff);
+}
+
+.article-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  gap: 12px;
+}
+
+.article-card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  flex: 1;
+}
+
+.score-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.score-high {
+  background-color: var(--success-bg);
+  color: var(--success-color);
+}
+
+.score-medium {
+  background-color: var(--warning-bg);
+  color: var(--warning-color);
+}
+
+.score-low {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+
+.article-card-product {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.article-card-summary {
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.top-match-badge {
+  position: absolute;
+  top: -8px;
+  right: 16px;
+  background: var(--primary-color);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 /* Responsive adjustments */
 @media (max-width: 400px) {
   .container {
@@ -363,5 +466,14 @@ body {
   .btn {
     padding: 10px 16px;
     font-size: 13px;
+  }
+  
+  .article-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .score-badge {
+    align-self: flex-start;
   }
 }

@@ -36,6 +36,22 @@
       <button id="tryAgainBtn" class="btn btn-secondary">Try Again</button>
     </div>
 
+    <!-- Article Selection Section -->
+    <div id="articleSelectionSection" class="section hidden">
+      <div id="lowConfidenceWarning" class="message-box message-info hidden">
+        <p><strong>⚠️ Low Confidence Match</strong></p>
+        <p>We found some potential solutions, but they may not be exact matches. Please review and select the best option.</p>
+      </div>
+      
+      <h2 class="selection-title">Select the best matching solution:</h2>
+      
+      <div id="articleMatches" class="article-matches">
+        <!-- Article cards will be inserted here dynamically -->
+      </div>
+      
+      <button id="backToSearchFromSelection" class="btn btn-secondary">Search Again</button>
+    </div>
+
     <!-- Solution Overview -->
     <div id="solutionSection" class="section hidden">
       <div class="message-box message-success">

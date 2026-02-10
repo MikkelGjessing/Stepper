@@ -27,10 +27,21 @@ class StepManager {
       return null;
     }
 
+    const step = this.currentArticle.steps[this.currentStepIndex];
+    
+    // Handle both simple steps (strings) and enhanced steps (objects)
+    let stepText;
+    if (typeof step === 'string') {
+      stepText = step;
+    } else {
+      // Enhanced step - use customer-facing text or internal text
+      stepText = step.say_to_customer || step.text;
+    }
+
     return {
       stepNumber: this.currentStepIndex + 1,
       totalSteps: this.maxSteps,
-      stepText: this.currentArticle.steps[this.currentStepIndex],
+      stepText: stepText,
       isFirst: this.currentStepIndex === 0,
       isLast: this.currentStepIndex === this.maxSteps - 1,
       articleTitle: this.currentArticle.title,

@@ -1,5 +1,5 @@
 // UI Module - Main controller for the Stepper side panel
-import { findBestMatch } from './kb.js';
+import { retrieveArticles, getArticleById } from './retrieval.js';
 import { StepManager } from './stepper.js';
 
 // Initialize step manager
@@ -8,6 +8,9 @@ const stepManager = new StepManager();
 // Get DOM elements
 const searchSection = document.getElementById('searchSection');
 const noResultsSection = document.getElementById('noResultsSection');
+const articleSelectionSection = document.getElementById('articleSelectionSection');
+const lowConfidenceWarning = document.getElementById('lowConfidenceWarning');
+const articleMatches = document.getElementById('articleMatches');
 const solutionSection = document.getElementById('solutionSection');
 const stepSection = document.getElementById('stepSection');
 const fullArticleSection = document.getElementById('fullArticleSection');
@@ -17,6 +20,7 @@ const feedbackSuccessSection = document.getElementById('feedbackSuccessSection')
 const issueInput = document.getElementById('issueInput');
 const searchBtn = document.getElementById('searchBtn');
 const tryAgainBtn = document.getElementById('tryAgainBtn');
+const backToSearchFromSelection = document.getElementById('backToSearchFromSelection');
 const startBtn = document.getElementById('startBtn');
 const backToSearchBtn = document.getElementById('backToSearchBtn');
 const continueBtn = document.getElementById('continueBtn');
@@ -40,6 +44,7 @@ function showSection(section) {
 function hideAllSections() {
   searchSection.classList.add('hidden');
   noResultsSection.classList.add('hidden');
+  articleSelectionSection.classList.add('hidden');
   solutionSection.classList.add('hidden');
   stepSection.classList.add('hidden');
   fullArticleSection.classList.add('hidden');
@@ -56,14 +61,67 @@ function searchForSolution() {
     return;
   }
 
-  const article = findBestMatch(query);
+  const results = retrieveArticles(query, 3);
   
-  if (article) {
-    stepManager.setArticle(article);
-    displaySolutionOverview();
-  } else {
+  if (results.matches.length === 0) {
     showSection(noResultsSection);
+  } else {
+    displayArticleSelection(results);
   }
+}
+
+// Display article selection with top 3 matches
+function displayArticleSelection(results) {
+  // Show or hide low confidence warning
+  if (results.lowConfidence) {
+    lowConfidenceWarning.classList.remove('hidden');
+  } else {
+    lowConfidenceWarning.classList.add('hidden');
+  }
+  
+  // Clear previous matches
+  articleMatches.innerHTML = '';
+  
+  // Create article cards for each match
+  results.matches.forEach((match, index) => {
+    const card = document.createElement('div');
+    card.className = 'article-card';
+    if (index === 0) {
+      card.classList.add('top-match');
+    }
+    
+    card.innerHTML = `
+      <div class="article-card-header">
+        <h3 class="article-card-title">${match.title}</h3>
+        <span class="score-badge ${getScoreBadgeClass(match.score)}">
+          Score: ${match.score}
+        </span>
+      </div>
+      <p class="article-card-product">${match.product}</p>
+      <p class="article-card-summary">${match.summary}</p>
+      ${index === 0 ? '<div class="top-match-badge">Top Match</div>' : ''}
+    `;
+    
+    // Add click handler to select this article
+    card.addEventListener('click', () => selectArticle(match.article));
+    
+    articleMatches.appendChild(card);
+  });
+  
+  showSection(articleSelectionSection);
+}
+
+// Get CSS class for score badge based on score
+function getScoreBadgeClass(score) {
+  if (score >= 6) return 'score-high';
+  if (score >= 3) return 'score-medium';
+  return 'score-low';
+}
+
+// Handle article selection
+function selectArticle(article) {
+  stepManager.setArticle(article);
+  displaySolutionOverview();
 }
 
 // Display solution overview
@@ -161,9 +219,15 @@ function displayFullArticle() {
   const stepsList = document.getElementById('articleSteps');
   stepsList.innerHTML = '';
   
+  // Handle both simple steps (strings) and enhanced steps (objects)
   article.steps.forEach((step, index) => {
     const li = document.createElement('li');
-    li.textContent = step;
+    if (typeof step === 'string') {
+      li.textContent = step;
+    } else {
+      // Enhanced step object - use customer-facing text or internal text
+      li.textContent = step.say_to_customer || step.text;
+    }
     stepsList.appendChild(li);
   });
   
@@ -213,6 +277,7 @@ issueInput.addEventListener('keypress', (e) => {
 });
 
 tryAgainBtn.addEventListener('click', resetToSearch);
+backToSearchFromSelection.addEventListener('click', resetToSearch);
 startBtn.addEventListener('click', displayCurrentStep);
 backToSearchBtn.addEventListener('click', resetToSearch);
 
