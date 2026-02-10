@@ -1,5 +1,6 @@
-# Test files
+# Test and demo files
 test-stepper.mjs
+demo-*.html
 
 # Temporary files
 *.tmp
