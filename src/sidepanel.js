@@ -52,7 +52,7 @@ function searchForSolution() {
   const query = issueInput.value.trim();
   
   if (!query) {
-    alert('Please describe your issue');
+    alert('Please enter a description of your issue before searching');
     return;
   }
 
@@ -181,11 +181,11 @@ function submitFeedback() {
   const feedback = document.getElementById('feedbackText').value.trim();
   
   if (!feedback) {
-    alert('Please provide some feedback about what went wrong');
+    alert('Please describe what went wrong before submitting feedback');
     return;
   }
 
-  // In a real app, this would send to a backend
+  // TODO: Replace with backend API call when implementing server integration
   console.log('Feedback submitted:', {
     article: stepManager.getArticle().title,
     step: stepManager.getCurrentStep().stepNumber,
