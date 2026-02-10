@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stepper - Step-by-Step Guide</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Article Selection View -->
+    <div id="article-selection-view" class="view active">
+      <header>
+        <h1>📋 Knowledge Base</h1>
+        <p>Select an article to begin</p>
+      </header>
+      
+      <div id="article-list" class="article-list">
+        <!-- Articles will be populated here -->
+      </div>
+    </div>
+
+    <!-- Step Runner View -->
+    <div id="step-runner-view" class="view">
+      <header>
+        <h1 id="article-title">Article Title</h1>
+        <button id="reset-button" class="btn btn-secondary">Reset</button>
+      </header>
+
+      <!-- Step Counter -->
+      <div id="step-counter" class="step-counter">
+        <!-- Will show "This solution has X steps" -->
+      </div>
+
+      <!-- Step Card -->
+      <div id="step-card" class="step-card">
+        <div class="step-header">
+          <h2 id="step-number">Step 1</h2>
+        </div>
+        
+        <div class="step-content">
+          <div class="step-text" id="step-text">
+            <!-- Step text goes here -->
+          </div>
+          
+          <div class="expected-result" id="expected-result-container" style="display: none;">
+            <strong>Expected Result:</strong>
+            <p id="expected-result"></p>
+          </div>
+          
+          <details class="say-to-customer" id="say-to-customer-container" style="display: none;">
+            <summary>💬 Say to Customer</summary>
+            <p id="say-to-customer"></p>
+          </details>
+        </div>
+
+        <div class="step-actions">
+          <button id="back-button" class="btn btn-secondary">← Back</button>
+          <button id="continue-button" class="btn btn-primary">Continue →</button>
+          <button id="didnt-work-button" class="btn btn-warning">⚠️ This didn't work</button>
+          <button id="open-article-button" class="btn btn-secondary">📄 Open Full Article</button>
+        </div>
+      </div>
+
+      <!-- Completion View -->
+      <div id="completion-view" style="display: none;">
+        <div class="completion-card">
+          <h2>✅ Process Complete</h2>
+          <p>You have completed all steps in this solution.</p>
+          
+          <div class="completion-summary">
+            <h3>Summary</h3>
+            <div id="completed-steps-list">
+              <!-- Completed steps will be listed here -->
+            </div>
+            
+            <div id="failure-notes" style="display: none;">
+              <h3>⚠️ Failure Notes</h3>
+              <div id="failure-notes-list">
+                <!-- Failure notes will be listed here -->
+              </div>
+            </div>
+          </div>
+          
+          <button id="back-to-articles" class="btn btn-primary">← Back to Articles</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Full Article Modal -->
+    <div id="full-article-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 id="full-article-title">Article Title</h2>
+          <button id="close-article-modal" class="close-button">×</button>
+        </div>
+        <div class="modal-body" id="full-article-content">
+          <!-- Full article content will be shown here -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Failure Modal -->
+    <div id="failure-modal" class="modal" style="display: none;">
+      <div class="modal-content small">
+        <div class="modal-header">
+          <h2>Report Issue</h2>
+          <button id="close-failure-modal" class="close-button">×</button>
+        </div>
+        <div class="modal-body">
+          <form id="failure-form">
+            <div class="form-group">
+              <label for="failure-reason">Reason:</label>
+              <select id="failure-reason" required>
+                <option value="">Select a reason...</option>
+                <option value="not-applicable">Not Applicable to Situation</option>
+                <option value="did-not-resolve">Did Not Resolve Issue</option>
+                <option value="customer-declined">Customer Declined</option>
+                <option value="technical-limitation">Technical Limitation</option>
+                <option value="insufficient-permissions">Insufficient Permissions</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label for="failure-note">Note (optional):</label>
+              <textarea id="failure-note" rows="3" placeholder="Additional details..."></textarea>
+            </div>
+            
+            <div class="form-actions">
+              <button type="button" id="cancel-failure" class="btn btn-secondary">Cancel</button>
+              <button type="submit" class="btn btn-primary">Submit</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

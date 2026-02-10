@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Stepper - Step-by-Step Guide",
+  "version": "1.0.0",
+  "description": "A step-by-step guiding side panel for variance reduction",
+  "permissions": [
+    "sidePanel"
+  ],
+  "side_panel": {
+    "default_path": "src/sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open Stepper"
+  },
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
