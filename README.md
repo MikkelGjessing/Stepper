@@ -54,15 +54,44 @@ The extension is built with a clean modular architecture:
 
 ## Knowledge Base
 
-The extension includes a mock knowledge base with sample support articles for:
+The extension includes two knowledge base implementations:
 
+### Simple Knowledge Base (`src/kb.js`)
+A basic implementation with 5 sample support articles for:
 - Email sending issues
 - Password reset problems
 - Application crashes
 - Slow internet connection
 - Printer troubleshooting
 
-You can easily extend the knowledge base by editing `src/kb.js` and adding more articles.
+### Enhanced Knowledge Base (`src/kb.mock.js`)
+A comprehensive data model with 8 realistic support articles featuring:
+
+- **Detailed Step Information**: Each step includes internal description, expected outcome, and customer-facing instructions
+- **Step Types**: Distinguish between action steps and verification checks
+- **Prechecks**: Pre-flight validations before starting troubleshooting
+- **Fallback Paths**: Alternative troubleshooting routes with trigger keywords and reason categories
+- **Stop Conditions**: Clear success criteria for issue resolution
+- **Escalation Procedures**: When and where to escalate unresolved issues
+
+**Article Coverage:**
+1. Email Not Sending - Outlook (2 fallback paths)
+2. Email Not Sending - Gmail Web (1 fallback path)
+3. Cannot Connect to WiFi Network (1 fallback path) - shares initial steps with #4
+4. Ethernet Connection Not Working (1 fallback path) - shares initial steps with #3
+5. Application Crashing on Startup (2 fallback paths)
+6. Password Reset Link Not Working (1 fallback path)
+7. Computer Running Slowly (1 fallback path)
+8. Printer Not Responding (2 fallback paths)
+
+**Special Features:**
+- Articles #1 & #2 have overlapping content (email troubleshooting) for deduplication testing
+- Articles #3 & #4 share the first 3 steps (network connectivity basics)
+- Articles #1, #5, and #8 have multiple fallback paths for complex troubleshooting
+
+See [docs/KB_DATA_MODEL.md](docs/KB_DATA_MODEL.md) for complete schema documentation and usage examples.
+
+You can extend either knowledge base by adding more articles following the respective formats.
 
 ## Development
 
@@ -73,7 +102,9 @@ Stepper/
 ├── manifest.json          # Extension manifest
 ├── src/
 │   ├── background.js      # Background service worker
-│   ├── kb.js             # Knowledge base module
+│   ├── kb.js             # Simple knowledge base module
+│   ├── kb.mock.js        # Enhanced knowledge base with detailed model
+│   ├── validate-kb.js    # Validation script for enhanced KB
 │   ├── stepper.js        # Step navigation logic
 │   ├── sidepanel.html    # Side panel HTML
 │   ├── sidepanel.css     # Styling
@@ -82,10 +113,14 @@ Stepper/
 │   ├── icon16.png        # Extension icons
 │   ├── icon48.png
 │   └── icon128.png
+├── docs/
+│   └── KB_DATA_MODEL.md  # Enhanced data model documentation
 └── README.md
 ```
 
 ### Extending the Knowledge Base
+
+#### Simple Knowledge Base (`src/kb.js`)
 
 To add new support articles, edit `src/kb.js` and add objects to the `knowledgeBase` array:
 
@@ -102,6 +137,46 @@ To add new support articles, edit `src/kb.js` and add objects to the `knowledgeB
   ]
 }
 ```
+
+#### Enhanced Knowledge Base (`src/kb.mock.js`)
+
+For the enhanced model, use the detailed schema:
+
+```javascript
+{
+  id: 9,
+  title: "Article Title",
+  tags: ["tag1", "tag2"],
+  product: "Product Name",
+  version: "1.0",  // optional
+  summary: "Brief summary",
+  prechecks: ["Precheck 1", "Precheck 2"],
+  steps: [
+    {
+      id: "step-9-1",
+      text: "Internal description",
+      expected: "Expected outcome",
+      say_to_customer: "Customer-facing instruction",
+      type: "action"  // or "check"
+    }
+  ],
+  fallbacks: [
+    {
+      id: "fallback-9-1",
+      trigger_keywords: ["keyword1", "keyword2"],
+      reason_category: "category_name",
+      steps: [/* step objects */]
+    }
+  ],
+  stop_conditions: ["Condition 1", "Condition 2"],
+  escalation: {
+    when: "After X minutes or condition",
+    target: "Team Name"
+  }
+}
+```
+
+Run `node src/validate-kb.js` to validate your changes.
 
 ### Customizing the UI
 
