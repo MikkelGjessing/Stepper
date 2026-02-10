@@ -8,19 +8,22 @@ Stepper is a browser extension that provides step-by-step support guidance throu
 
 ## Features
 
-- 🎯 **Intelligent Article Matching**: Automatically finds the best matching support article based on user's issue description
-- 📋 **Step-by-Step Guidance**: Presents solutions one step at a time for better focus and comprehension
+- 🎯 **Intelligent Article Retrieval**: Weighted scoring algorithm finds top 3 matching articles
+- 📊 **Confidence Scoring**: Shows match scores and warns when confidence is low
+- 🎨 **Article Selection UI**: Agent picks from top 3 matches with scores and summaries
+- 📋 **Step-by-Step Guidance**: Presents solutions one step at a time for better focus
 - ⬅️ **Navigation Controls**: Continue, Back, and Reset buttons for flexible navigation
 - 📄 **Full Article View**: Option to view all steps at once
 - ⚠️ **Feedback Mechanism**: "This didn't work" button for user feedback
-- 🎨 **Modern UI**: Clean, intuitive interface with visual progress indicators
-- 🏗️ **Modular Architecture**: Separate modules for UI, retrieval, and step logic
+- 🏗️ **Modular Architecture**: Separate swappable modules for UI, retrieval, and step logic
 
 ## Architecture
 
 The extension is built with a clean modular architecture:
 
-- **`src/kb.js`**: Knowledge Base module - handles article storage and retrieval logic
+- **`src/retrieval.js`**: Article retrieval module - scoring algorithm and matching logic (swappable with API)
+- **`src/kb.js`**: Simple knowledge base module - basic article storage (legacy)
+- **`src/kb.mock.js`**: Enhanced knowledge base - detailed articles with fallback paths
 - **`src/stepper.js`**: Step Logic module - manages step navigation and state
 - **`src/sidepanel.js`**: UI module - controls user interactions and view updates
 - **`src/sidepanel.html`**: HTML structure for the side panel
@@ -90,6 +93,8 @@ A comprehensive data model with 8 realistic support articles featuring:
 - Articles #1, #5, and #8 have multiple fallback paths for complex troubleshooting
 
 See [docs/KB_DATA_MODEL.md](docs/KB_DATA_MODEL.md) for complete schema documentation and usage examples.
+
+See [docs/RETRIEVAL_SYSTEM.md](docs/RETRIEVAL_SYSTEM.md) for details on the article retrieval and scoring algorithm.
 
 You can extend either knowledge base by adding more articles following the respective formats.
 
