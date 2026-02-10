@@ -109,9 +109,9 @@ export function retrieveArticles(query, topN = 3) {
     .slice(0, topN)
     .filter(match => match.score > 0); // Only return articles with some score
   
-  // Determine if confidence is low (top score < 3)
+  // Determine if confidence is low (top score < 9)
   const topScore = topMatches.length > 0 ? topMatches[0].score : 0;
-  const lowConfidence = topScore < 3;
+  const lowConfidence = topScore < 9;
   
   return {
     matches: topMatches.map(match => ({

@@ -24,3 +24,4 @@ tmp/
 # Test files
 test.html
 demo-kb-model.html
+src/test-retrieval.js
