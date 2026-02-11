@@ -168,8 +168,8 @@ async function handleUserInput() {
     const result = articles[0];
     addAssistantMessage(`I found a solution: "${result.article.title}". This solution has ${(result.article.steps || []).length} steps. Let's begin!`);
     
-    // Start article
-    await selectArticleInChat(result.article.id);
+    // Start article (skip duplicate message)
+    await selectArticleInChat(result.article.id, true);
   } else {
     // Multiple matches - show as cards (top 3)
     const cardsContainer = document.createElement('div');
@@ -229,33 +229,23 @@ function createArticleCard(result) {
 
 /**
  * Select article and begin steps in chat
+ * @param {boolean} skipMessage - Skip the "This solution has X steps" message (for single-article flow)
  */
-async function selectArticleInChat(articleId) {
+async function selectArticleInChat(articleId, skipMessage = false) {
   currentArticle = await retrieval.getArticle(articleId);
   if (!currentArticle) return;
   
   stepRunner.startArticle(articleId, currentArticle);
   chatState = 'in-step';
   
-  const totalSteps = stepRunner.getTotalSteps(currentArticle);
-  addAssistantMessage(`This solution has ${totalSteps} steps. Let's begin!`);
+  // Show "This solution has X steps" message for multi-article selection
+  if (!skipMessage) {
+    const totalSteps = stepRunner.getTotalSteps(currentArticle);
+    addAssistantMessage(`This solution has ${totalSteps} steps. Let's begin!`);
+  }
   
   // Show first step
   showCurrentStepInChat();
-}
-
-/**
- * Show stepping stones progress indicator (disabled in minimal MVP)
- */
-function showSteppingStonesProgress() {
-  // Disabled for minimal MVP
-}
-
-/**
- * Update stepping stones indicator (disabled in minimal MVP)
- */
-function updateSteppingStonesInChat() {
-  // Disabled for minimal MVP
 }
 
 /**
