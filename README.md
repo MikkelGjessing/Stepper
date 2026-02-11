@@ -82,9 +82,34 @@ Stepper uses feature flags to control optional functionality. These are configur
 - **Purpose**: Automatically scan the active tab for relevant content
 - **When enabled**: 
   - Scans page content on initialization
+  - **Extracts label-value pairs** (e.g., "Customer ID: ABC123", "Terminal ID: T-456")
+  - Stores extracted context for intelligent step augmentation
   - Prefills search query with extracted information
+  - Augments step instructions with detected values
   - Shows notification when content is detected
   - Uses mocked data (deterministic behavior for testing)
+
+#### Context Extraction
+
+When page scanning is enabled, the system automatically:
+
+1. **Extracts structured data** from the page using pattern matching:
+   - `Label: Value` (colon separator)
+   - `Label = Value` (equals separator)
+   - `Label - Value` (dash separator)
+
+2. **Stores in extractedContext Map** for later use
+
+3. **Augments step text** when labels are mentioned:
+   ```
+   Original: "Verify SMTP Server and Port Number"
+   Augmented: "Verify SMTP Server and Port Number 
+              (Stepper found: SMTP Server: smtp.gmail.com, Port Number: 587)"
+   ```
+
+4. **Case-insensitive matching** detects labels regardless of case
+
+See [CONTEXT_EXTRACTION.md](CONTEXT_EXTRACTION.md) for complete documentation.
 
 ### Enabling Feature Flags
 
