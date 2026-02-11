@@ -182,10 +182,16 @@ function augmentTextWithContext(text) {
   
   const contextHints = [];
   
+  // Pre-compile regexes for efficiency
+  const labelRegexes = new Map();
+  extractedContext.forEach((value, label) => {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    labelRegexes.set(label, new RegExp(`\\b${escapedLabel}\\b`, 'i'));
+  });
+  
   // Check if any context labels are mentioned in the text (case-insensitive)
   extractedContext.forEach((value, label) => {
-    // Create case-insensitive regex for the label
-    const labelRegex = new RegExp(`\\b${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    const labelRegex = labelRegexes.get(label);
     
     if (labelRegex.test(text)) {
       contextHints.push(`${escapeHtml(label)}: ${escapeHtml(value)}`);

@@ -182,10 +182,11 @@ export class DefaultPageScanner extends PageScanner {
     // - "Label: Value" (colon separator)
     // - "Label = Value" (equals separator)
     // - "Label - Value" (dash separator, with extra spacing)
+    // Labels can contain letters, numbers, spaces, hyphens, and underscores
     const patterns = [
-      /([A-Z][A-Za-z\s]+?):\s*([^\n]+)/g,  // Colon: "Customer ID: ABC123"
-      /([A-Z][A-Za-z\s]+?)\s*=\s*([^\n]+)/g,  // Equals: "Status = Active"
-      /([A-Z][A-Za-z\s]+?)\s+-\s+([^\n]+)/g   // Dash: "Account Type - Premium"
+      /([A-Za-z0-9][A-Za-z0-9\s\-_]+?):\s*([^\n]+)/g,  // Colon: "Customer ID: ABC123", "IPv4 Address: 192.168.1.1"
+      /([A-Za-z0-9][A-Za-z0-9\s\-_]+?)\s*=\s*([^\n]+)/g,  // Equals: "Status = Active", "2FA Code = 123"
+      /([A-Za-z0-9][A-Za-z0-9\s\-_]+?)\s+-\s+([^\n]+)/g   // Dash: "Account Type - Premium"
     ];
     
     patterns.forEach(pattern => {
