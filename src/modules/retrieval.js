@@ -179,8 +179,9 @@ export class MockRetrievalProvider extends RetrievalProvider {
  * @param {RetrievalResult[]} results - Search results
  * @returns {boolean} True if confidence is low
  */
+export const LOW_CONFIDENCE_THRESHOLD = 9;
+
 export function isLowConfidence(results) {
-  const LOW_CONFIDENCE_THRESHOLD = 9;
   if (!results || results.length === 0) return true;
   return results[0].score < LOW_CONFIDENCE_THRESHOLD;
 }

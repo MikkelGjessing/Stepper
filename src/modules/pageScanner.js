@@ -132,6 +132,8 @@ export class DefaultPageScanner extends PageScanner {
    * @private
    */
   _extractPageContent() {
+    const MAX_TEXT_LENGTH = 10000; // Maximum text length to extract
+    
     // Extract basic page content
     const text = document.body.innerText || document.body.textContent || '';
     const title = document.title || '';
@@ -151,7 +153,7 @@ export class DefaultPageScanner extends PageScanner {
 
     return {
       title,
-      text: text.substring(0, 10000), // Limit text length
+      text: text.substring(0, MAX_TEXT_LENGTH), // Limit text length
       metadata
     };
   }

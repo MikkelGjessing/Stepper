@@ -323,7 +323,9 @@ function showCompletion() {
 function handleReset() {
   if (confirm('Are you sure you want to reset? All progress will be lost.')) {
     stepRunner.reset();
-    renderCurrentStep();
+    currentArticle = null;
+    stepRunnerView.classList.remove('active');
+    articleSelectionView.classList.add('active');
   }
 }
 
