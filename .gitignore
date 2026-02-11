@@ -1,6 +1,7 @@
 # Test and demo files
 test-stepper.mjs
 test-fallback.mjs
+test-feature-flags.html
 demo-*.html
 
 # Temporary files

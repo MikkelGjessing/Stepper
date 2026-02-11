@@ -53,11 +53,60 @@ Stepper/
 │   ├── sidepanel.js       # Main UI logic and event handlers
 │   ├── stepper.js         # State machine implementation
 │   ├── kb.js              # Knowledge base management
-│   └── kb.mock.js         # Mock knowledge base data
+│   ├── kb.mock.js         # Mock knowledge base data (legacy)
+│   └── modules/           # Modular architecture
+│       ├── config.js      # Feature flags and configuration
+│       ├── retrieval.js   # Article retrieval (swappable provider)
+│       ├── stepRunner.js  # Step execution state machine
+│       ├── dedupe.js      # Deduplication utilities
+│       ├── pageScanner.js # Page content scanning
+│       ├── ui.js          # UI rendering utilities
+│       └── kb.mock.js     # Mock knowledge base articles
 └── icons/
     ├── icon16.png         # 16x16 extension icon
     ├── icon48.png         # 48x48 extension icon
     └── icon128.png        # 128x128 extension icon
+```
+
+## Feature Flags
+
+Stepper uses feature flags to control optional functionality. These are configured in `src/modules/config.js`:
+
+### ENABLE_LLM_ASSIST
+- **Default**: `false`
+- **Purpose**: Enable AI-powered assistance features (not yet implemented)
+- **When enabled**: Will provide LLM-based suggestions and analysis
+
+### ENABLE_PAGE_SCAN
+- **Default**: `false` (disabled for security and performance)
+- **Purpose**: Automatically scan the active tab for relevant content
+- **When enabled**: 
+  - Scans page content on initialization
+  - Prefills search query with extracted information
+  - Shows notification when content is detected
+  - Uses mocked data (deterministic behavior for testing)
+
+### Enabling Feature Flags
+
+To enable a feature flag, edit `src/modules/config.js`:
+
+```javascript
+export const FeatureFlags = {
+  ENABLE_LLM_ASSIST: false,
+  ENABLE_PAGE_SCAN: true,  // Change to true to enable
+};
+```
+
+Or use the API programmatically:
+
+```javascript
+import { setFeatureFlag } from './modules/config.js';
+
+// Enable page scanning
+setFeatureFlag('ENABLE_PAGE_SCAN', true);
+
+// Disable LLM assist
+setFeatureFlag('ENABLE_LLM_ASSIST', false);
 ```
 
 ## Knowledge Base Schema
