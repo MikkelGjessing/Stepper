@@ -1,28 +1,35 @@
 // Side Panel Main Script
-// Orchestrates UI interactions and module coordination
+// Handles UI interactions and state management
 
-// Import modules
-import { MockRetrievalProvider } from './modules/retrieval.js';
-import { mockArticles } from './modules/kb.mock.js';
-import { StepRunner } from './modules/stepRunner.js';
-import { createPageScanner } from './modules/pageScanner.js';
-import { 
-  showNotification, 
-  formatReason,
-  renderArticleItem,
-  renderCompletedStep,
-  renderFailureNote,
-  populateFullArticle,
-  updateStepProgress,
-  toggleElement,
-  clearElement
-} from './modules/ui.js';
+import KnowledgeBase from './kb.js';
+import { mockArticles } from './kb.mock.js';
+import StepperStateMachine from './stepper.js';
 
-// Initialize modules
-const retrieval = new MockRetrievalProvider(mockArticles);
-const stepRunner = new StepRunner();
-const pageScanner = createPageScanner('default'); // Disabled by default
+// Initialize
+const kb = new KnowledgeBase();
+const stepper = new StepperStateMachine();
 let currentArticle = null;
+
+// Load mock articles
+kb.loadArticles(mockArticles);
+
+// Notification helper function
+function showNotification(message, options = {}) {
+  const { 
+    type = 'info',  // 'info', 'success', 'warning', 'error' - for future use
+    requireConfirm = false 
+  } = options;
+  
+  if (requireConfirm) {
+    return confirm(message);
+  }
+  
+  // For now, use alert for simplicity
+  // TODO: Replace with toast notification system for better UX
+  // The 'type' parameter can be used for styling different notification types
+  alert(message);
+  return true;
+}
 
 // DOM Elements
 const articleSelectionView = document.getElementById('article-selection-view');
@@ -63,29 +70,34 @@ const failureNote = document.getElementById('failure-note');
 function init() {
   renderArticleList();
   setupEventListeners();
-  
-  // Log module initialization
-  console.log('[Stepper] Modules initialized');
-  console.log('[PageScanner] Enabled:', pageScanner.isEnabled());
 }
 
 // Render article list
-async function renderArticleList() {
-  clearElement(articleList);
-  const articles = await retrieval.getAllArticles();
+function renderArticleList() {
+  articleList.innerHTML = '';
+  const articles = kb.getAllArticles();
   
   articles.forEach(article => {
-    const articleItem = renderArticleItem(article, () => selectArticle(article.id));
+    const articleItem = document.createElement('div');
+    articleItem.className = 'article-item';
+    articleItem.innerHTML = `
+      <h3>${article.title}</h3>
+      <p>${article.summary}</p>
+      <div class="article-tags">
+        ${article.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+      </div>
+    `;
+    articleItem.addEventListener('click', () => selectArticle(article.id));
     articleList.appendChild(articleItem);
   });
 }
 
 // Select an article and start the stepper
-async function selectArticle(articleId) {
-  currentArticle = await retrieval.getArticle(articleId);
+function selectArticle(articleId) {
+  currentArticle = kb.getArticle(articleId);
   if (!currentArticle) return;
   
-  const startInfo = stepRunner.startArticle(articleId, currentArticle);
+  const startInfo = stepper.startArticle(articleId, currentArticle);
   
   // Switch to step runner view
   articleSelectionView.classList.remove('active');
@@ -93,7 +105,7 @@ async function selectArticle(articleId) {
   
   // Update UI
   articleTitle.textContent = currentArticle.title;
-  updateStepProgressIndicator();
+  updateStepProgress();
   
   // Populate inline full article content
   populateFullArticleInline();
@@ -103,23 +115,18 @@ async function selectArticle(articleId) {
 }
 
 // Update step progress indicator
-function updateStepProgressIndicator() {
-  const state = stepRunner.getState();
-  const totalSteps = stepRunner.getTotalSteps(currentArticle);
-  updateStepProgress(stepProgress, state.currentStepIndex + 1, totalSteps);
-}
-
-// Populate inline full article content
-function populateFullArticleInline() {
-  populateFullArticle(currentArticle, fullArticleContentInline);
+function updateStepProgress() {
+  const state = stepper.getState();
+  const totalSteps = stepper.getTotalSteps(currentArticle);
+  stepProgress.textContent = `Step ${state.currentStepIndex + 1} of ${totalSteps}`;
 }
 
 // Render the current step
 function renderCurrentStep() {
-  const step = stepRunner.getCurrentStep(currentArticle);
-  const state = stepRunner.getState();
+  const step = stepper.getCurrentStep(currentArticle);
+  const state = stepper.getState();
   
-  if (!step || stepRunner.isComplete(currentArticle)) {
+  if (!step || stepper.isComplete(currentArticle)) {
     showCompletion();
     return;
   }
@@ -129,15 +136,15 @@ function renderCurrentStep() {
   completionView.style.display = 'none';
   
   // Update step progress
-  updateStepProgressIndicator();
+  updateStepProgress();
   
   // Show skipped steps banner if applicable
-  const skippedCount = stepRunner.getSkippedStepsCount();
+  const skippedCount = stepper.getSkippedStepsCount();
   if (skippedCount > 0) {
     skippedStepsBanner.style.display = 'block';
     skippedStepsBanner.textContent = `Skipped ${skippedCount} step${skippedCount > 1 ? 's' : ''} already completed.`;
     // Clear the count so banner doesn't show on subsequent steps
-    stepRunner.clearSkippedStepsCount();
+    stepper.clearSkippedStepsCount();
   } else {
     skippedStepsBanner.style.display = 'none';
   }
@@ -167,7 +174,7 @@ function renderCurrentStep() {
 
 // Handle Continue button
 function handleContinue() {
-  const result = stepRunner.continue(currentArticle);
+  const result = stepper.continue(currentArticle);
   
   if (result.completed) {
     showCompletion();
@@ -178,8 +185,7 @@ function handleContinue() {
 
 // Handle Back button
 function handleBack() {
-  const result = stepRunner.back();
-  
+  const result = stepper.back();
   if (result.success) {
     renderCurrentStep();
   }
@@ -193,22 +199,22 @@ function handleDidntWork() {
 }
 
 // Handle failure form submission
-async function handleFailureSubmit(e) {
+function handleFailureSubmit(e) {
   e.preventDefault();
   
-  const step = stepRunner.getCurrentStep(currentArticle);
+  const step = stepper.getCurrentStep(currentArticle);
   const reason = failureReason.value;
   const note = failureNote.value;
   
   // Record the failure
-  stepRunner.recordFailure(step.id, reason, note);
+  stepper.recordFailure(step.id, reason, note);
   
   failureModal.style.display = 'none';
   
   // Get all completed step texts for deduplication
   const completedStepTexts = [];
   const allSteps = currentArticle.steps || [];
-  const state = stepRunner.getState();
+  const state = stepper.getState();
   
   allSteps.forEach(s => {
     // Check Set membership using includes since getState() converts to Array
@@ -218,17 +224,16 @@ async function handleFailureSubmit(e) {
   });
   
   // Select appropriate fallback
-  const allArticles = await retrieval.getAllArticles();
-  const fallbackResult = stepRunner.selectFallback(
+  const fallbackResult = stepper.selectFallback(
     currentArticle,
-    allArticles,
+    kb.getAllArticles(),
     reason,
     note
   );
   
   if (fallbackResult.type === 'same-article') {
     // Switch to fallback in same article
-    const result = stepRunner.switchToFallback(
+    const result = stepper.switchToFallback(
       fallbackResult.fallback.id,
       currentArticle,
       completedStepTexts
@@ -249,7 +254,7 @@ async function handleFailureSubmit(e) {
       currentArticle = fallbackResult.article;
       articleTitle.textContent = currentArticle.title;
       
-      const result = stepRunner.switchToFallback(
+      const result = stepper.switchToFallback(
         fallbackResult.fallback.id,
         currentArticle,
         completedStepTexts
@@ -288,17 +293,20 @@ function showCompletion() {
   stepCard.style.display = 'none';
   completionView.style.display = 'block';
   
-  const summary = stepRunner.getCompletionSummary();
+  const summary = stepper.getCompletionSummary();
   
   // Render completed steps
   const completedStepsList = document.getElementById('completed-steps-list');
-  clearElement(completedStepsList);
+  completedStepsList.innerHTML = '';
   
-  const steps = stepRunner.getStepsForActivePath(currentArticle);
+  const steps = stepper.getStepsForActivePath(currentArticle);
   summary.completedSteps.forEach(stepId => {
     const step = steps.find(s => s.id === stepId);
     if (step) {
-      completedStepsList.appendChild(renderCompletedStep(step));
+      const stepItem = document.createElement('div');
+      stepItem.className = 'completed-step';
+      stepItem.textContent = `✓ ${step.text}`;
+      completedStepsList.appendChild(stepItem);
     }
   });
   
@@ -308,31 +316,135 @@ function showCompletion() {
   
   if (summary.failureHistory.length > 0) {
     failureNotesContainer.style.display = 'block';
-    clearElement(failureNotesList);
+    failureNotesList.innerHTML = '';
     
     summary.failureHistory.forEach(failure => {
       const step = steps.find(s => s.id === failure.stepId);
-      failureNotesList.appendChild(renderFailureNote(failure, step));
+      const failureItem = document.createElement('div');
+      failureItem.className = 'failure-note';
+      failureItem.innerHTML = `
+        <strong>${step ? step.text : failure.stepId}</strong>
+        <p><strong>Reason:</strong> ${formatReason(failure.reasonCategory)}</p>
+        ${failure.note ? `<p><strong>Note:</strong> ${failure.note}</p>` : ''}
+        <p class="timestamp">${new Date(failure.timestamp).toLocaleString()}</p>
+      `;
+      failureNotesList.appendChild(failureItem);
     });
   } else {
     failureNotesContainer.style.display = 'none';
   }
 }
 
+// Format failure reason for display
+function formatReason(reason) {
+  const reasons = {
+    'cant-find-option': "Customer can't find option/button",
+    'system-error': 'System error message',
+    'permission-issue': 'Permission/access issue',
+    'no-change': "Outcome didn't change",
+    'other': 'Other'
+  };
+  return reasons[reason] || reason;
+}
+
+// Populate inline full article content
+function populateFullArticleInline() {
+  if (!currentArticle) return;
+  
+  fullArticleContentInline.innerHTML = '';
+  
+  // Add summary
+  const summarySection = document.createElement('div');
+  summarySection.className = 'article-section';
+  summarySection.innerHTML = `
+    <h3>Summary</h3>
+    <p>${currentArticle.summary}</p>
+  `;
+  fullArticleContentInline.appendChild(summarySection);
+  
+  // Add prechecks if available
+  if (currentArticle.prechecks && currentArticle.prechecks.length > 0) {
+    const prechecksSection = document.createElement('div');
+    prechecksSection.className = 'article-section';
+    prechecksSection.innerHTML = `
+      <h3>Pre-checks</h3>
+      <ul>
+        ${currentArticle.prechecks.map(check => `<li>${check}</li>`).join('')}
+      </ul>
+    `;
+    fullArticleContentInline.appendChild(prechecksSection);
+  }
+  
+  // Add main steps
+  const stepsSection = document.createElement('div');
+  stepsSection.className = 'article-section';
+  stepsSection.innerHTML = `<h3>Steps</h3>`;
+  
+  currentArticle.steps.forEach((step, index) => {
+    const stepItem = document.createElement('div');
+    stepItem.className = 'step-item';
+    stepItem.innerHTML = `
+      <strong>Step ${index + 1}:</strong> ${step.text}
+      ${step.expectedResult ? `<br><em>Expected: ${step.expectedResult}</em>` : ''}
+    `;
+    stepsSection.appendChild(stepItem);
+  });
+  
+  fullArticleContentInline.appendChild(stepsSection);
+  
+  // Add fallbacks if available
+  if (currentArticle.fallbacks && currentArticle.fallbacks.length > 0) {
+    const fallbacksSection = document.createElement('div');
+    fallbacksSection.className = 'article-section';
+    fallbacksSection.innerHTML = `<h3>Fallback Procedures</h3>`;
+    
+    currentArticle.fallbacks.forEach(fallback => {
+      const fallbackItem = document.createElement('div');
+      fallbackItem.innerHTML = `<strong>${fallback.condition}</strong>`;
+      const fallbackSteps = document.createElement('ol');
+      fallback.steps.forEach(step => {
+        const li = document.createElement('li');
+        li.textContent = step.text;
+        fallbackSteps.appendChild(li);
+      });
+      fallbackItem.appendChild(fallbackSteps);
+      fallbacksSection.appendChild(fallbackItem);
+    });
+    
+    fullArticleContentInline.appendChild(fallbacksSection);
+  }
+  
+  // Add escalation info if available
+  if (currentArticle.escalation) {
+    const escalationSection = document.createElement('div');
+    escalationSection.className = 'article-section';
+    escalationSection.innerHTML = `
+      <h3>Escalation</h3>
+      <p><strong>When:</strong> ${currentArticle.escalation.when}</p>
+      <p><strong>Target:</strong> ${currentArticle.escalation.target}</p>
+    `;
+    fullArticleContentInline.appendChild(escalationSection);
+  }
+}
+
 // Handle reset
 function handleReset() {
   if (confirm('Are you sure you want to reset? All progress will be lost.')) {
-    stepRunner.reset();
-    renderCurrentStep();
+    stepper.reset();
+    currentArticle = null;
+    
+    stepRunnerView.classList.remove('active');
+    articleSelectionView.classList.add('active');
   }
 }
 
 // Handle back to articles
 function handleBackToArticles() {
+  stepper.reset();
+  currentArticle = null;
+  
   stepRunnerView.classList.remove('active');
   articleSelectionView.classList.add('active');
-  stepRunner.reset();
-  currentArticle = null;
 }
 
 // Setup event listeners
@@ -393,7 +505,7 @@ function handleKeyboardShortcuts(e) {
 }
 
 // Handle article search
-async function handleSearch(e) {
+function handleSearch(e) {
   const query = e.target.value.toLowerCase().trim();
   
   if (!query) {
@@ -402,13 +514,28 @@ async function handleSearch(e) {
     return;
   }
   
-  // Filter articles using retrieval module
-  const filtered = await retrieval.filterArticles(query);
+  // Filter articles
+  const allArticles = kb.getAllArticles();
+  const filtered = allArticles.filter(article => {
+    return article.title.toLowerCase().includes(query) ||
+           article.summary.toLowerCase().includes(query) ||
+           (article.tags || []).some(tag => tag.toLowerCase().includes(query)) ||
+           (article.keywords || []).some(kw => kw.toLowerCase().includes(query));
+  });
   
   // Render filtered list
-  clearElement(articleList);
+  articleList.innerHTML = '';
   filtered.forEach(article => {
-    const articleItem = renderArticleItem(article, () => selectArticle(article.id));
+    const articleItem = document.createElement('div');
+    articleItem.className = 'article-item';
+    articleItem.innerHTML = `
+      <h3>${article.title}</h3>
+      <p>${article.summary}</p>
+      <div class="article-tags">
+        ${article.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+      </div>
+    `;
+    articleItem.addEventListener('click', () => selectArticle(article.id));
     articleList.appendChild(articleItem);
   });
   

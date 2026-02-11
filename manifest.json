@@ -4,7 +4,12 @@
   "version": "1.0.0",
   "description": "A step-by-step guiding side panel for variance reduction",
   "permissions": [
-    "sidePanel"
+    "sidePanel",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "side_panel": {
     "default_path": "src/sidepanel.html"
