@@ -36,13 +36,15 @@ const articleSelectionView = document.getElementById('article-selection-view');
 const stepRunnerView = document.getElementById('step-runner-view');
 const articleList = document.getElementById('article-list');
 const articleTitle = document.getElementById('article-title');
-const stepCounter = document.getElementById('step-counter');
+const stepProgress = document.getElementById('step-progress');
+const articleSearch = document.getElementById('article-search');
 const skippedStepsBanner = document.getElementById('skipped-steps-banner');
 const stepCard = document.getElementById('step-card');
 const completionView = document.getElementById('completion-view');
+const fullArticleSection = document.getElementById('full-article-section');
+const fullArticleContentInline = document.getElementById('full-article-content-inline');
 
 // Step Card Elements
-const stepNumber = document.getElementById('step-number');
 const stepText = document.getElementById('step-text');
 const expectedResultContainer = document.getElementById('expected-result-container');
 const expectedResult = document.getElementById('expected-result');
@@ -53,7 +55,6 @@ const sayToCustomer = document.getElementById('say-to-customer');
 const continueButton = document.getElementById('continue-button');
 const backButton = document.getElementById('back-button');
 const didntWorkButton = document.getElementById('didnt-work-button');
-const openArticleButton = document.getElementById('open-article-button');
 const resetButton = document.getElementById('reset-button');
 const backToArticlesButton = document.getElementById('back-to-articles');
 
@@ -109,10 +110,20 @@ function selectArticle(articleId) {
   
   // Update UI
   articleTitle.textContent = currentArticle.title;
-  stepCounter.textContent = `This solution has ${startInfo.totalSteps} steps`;
+  updateStepProgress();
+  
+  // Populate inline full article content
+  populateFullArticleInline();
   
   // Show first step
   renderCurrentStep();
+}
+
+// Update step progress indicator
+function updateStepProgress() {
+  const state = stepper.getState();
+  const totalSteps = stepper.getTotalSteps(currentArticle);
+  stepProgress.textContent = `Step ${state.currentStepIndex + 1} of ${totalSteps}`;
 }
 
 // Render the current step
@@ -129,6 +140,9 @@ function renderCurrentStep() {
   stepCard.style.display = 'block';
   completionView.style.display = 'none';
   
+  // Update step progress
+  updateStepProgress();
+  
   // Show skipped steps banner if applicable
   const skippedCount = stepper.getSkippedStepsCount();
   if (skippedCount > 0) {
@@ -139,9 +153,6 @@ function renderCurrentStep() {
   } else {
     skippedStepsBanner.style.display = 'none';
   }
-  
-  // Update step number
-  stepNumber.textContent = `Step ${state.currentStepIndex + 1}`;
   
   // Update step text
   stepText.textContent = step.text;
@@ -341,6 +352,86 @@ function formatReason(reason) {
   return reasons[reason] || reason;
 }
 
+// Populate inline full article content
+function populateFullArticleInline() {
+  if (!currentArticle) return;
+  
+  fullArticleContentInline.innerHTML = '';
+  
+  // Add summary
+  const summarySection = document.createElement('div');
+  summarySection.className = 'article-section';
+  summarySection.innerHTML = `
+    <h3>Summary</h3>
+    <p>${currentArticle.summary}</p>
+  `;
+  fullArticleContentInline.appendChild(summarySection);
+  
+  // Add prechecks if available
+  if (currentArticle.prechecks && currentArticle.prechecks.length > 0) {
+    const prechecksSection = document.createElement('div');
+    prechecksSection.className = 'article-section';
+    prechecksSection.innerHTML = `
+      <h3>Pre-checks</h3>
+      <ul>
+        ${currentArticle.prechecks.map(check => `<li>${check}</li>`).join('')}
+      </ul>
+    `;
+    fullArticleContentInline.appendChild(prechecksSection);
+  }
+  
+  // Add main steps
+  const stepsSection = document.createElement('div');
+  stepsSection.className = 'article-section';
+  stepsSection.innerHTML = `<h3>Steps</h3>`;
+  
+  currentArticle.steps.forEach((step, index) => {
+    const stepItem = document.createElement('div');
+    stepItem.className = 'step-item';
+    stepItem.innerHTML = `
+      <strong>Step ${index + 1}:</strong> ${step.text}
+      ${step.expectedResult ? `<br><em>Expected: ${step.expectedResult}</em>` : ''}
+    `;
+    stepsSection.appendChild(stepItem);
+  });
+  
+  fullArticleContentInline.appendChild(stepsSection);
+  
+  // Add fallbacks if available
+  if (currentArticle.fallbacks && currentArticle.fallbacks.length > 0) {
+    const fallbacksSection = document.createElement('div');
+    fallbacksSection.className = 'article-section';
+    fallbacksSection.innerHTML = `<h3>Fallback Procedures</h3>`;
+    
+    currentArticle.fallbacks.forEach(fallback => {
+      const fallbackItem = document.createElement('div');
+      fallbackItem.innerHTML = `<strong>${fallback.condition}</strong>`;
+      const fallbackSteps = document.createElement('ol');
+      fallback.steps.forEach(step => {
+        const li = document.createElement('li');
+        li.textContent = step.text;
+        fallbackSteps.appendChild(li);
+      });
+      fallbackItem.appendChild(fallbackSteps);
+      fallbacksSection.appendChild(fallbackItem);
+    });
+    
+    fullArticleContentInline.appendChild(fallbacksSection);
+  }
+  
+  // Add escalation info if available
+  if (currentArticle.escalation) {
+    const escalationSection = document.createElement('div');
+    escalationSection.className = 'article-section';
+    escalationSection.innerHTML = `
+      <h3>Escalation</h3>
+      <p><strong>When:</strong> ${currentArticle.escalation.when}</p>
+      <p><strong>Target:</strong> ${currentArticle.escalation.target}</p>
+    `;
+    fullArticleContentInline.appendChild(escalationSection);
+  }
+}
+
 // Open full article modal
 function openFullArticle() {
   if (!currentArticle) return;
@@ -451,15 +542,17 @@ function handleBackToArticles() {
 
 // Setup event listeners
 function setupEventListeners() {
+  // Button listeners
   continueButton.addEventListener('click', handleContinue);
   backButton.addEventListener('click', handleBack);
   didntWorkButton.addEventListener('click', handleDidntWork);
-  openArticleButton.addEventListener('click', openFullArticle);
   resetButton.addEventListener('click', handleReset);
   backToArticlesButton.addEventListener('click', handleBackToArticles);
   
+  // Search functionality
+  articleSearch.addEventListener('input', handleSearch);
+  
   // Modal controls
-  closeArticleModal.addEventListener('click', closeFullArticle);
   closeFailureModal.addEventListener('click', () => {
     failureModal.style.display = 'none';
   });
@@ -469,16 +562,79 @@ function setupEventListeners() {
   failureForm.addEventListener('submit', handleFailureSubmit);
   
   // Close modals on background click
-  fullArticleModal.addEventListener('click', (e) => {
-    if (e.target === fullArticleModal) {
-      closeFullArticle();
-    }
-  });
   failureModal.addEventListener('click', (e) => {
     if (e.target === failureModal) {
       failureModal.style.display = 'none';
     }
   });
+  
+  // Keyboard shortcuts
+  document.addEventListener('keydown', handleKeyboardShortcuts);
+}
+
+// Handle keyboard shortcuts
+function handleKeyboardShortcuts(e) {
+  // Esc to close modals
+  if (e.key === 'Escape') {
+    if (failureModal.style.display === 'flex') {
+      failureModal.style.display = 'none';
+      e.preventDefault();
+    }
+    return;
+  }
+  
+  // Only handle Enter when not in a modal or text input
+  if (e.key === 'Enter' && 
+      failureModal.style.display !== 'flex' &&
+      !e.target.matches('input, textarea, select')) {
+    // Enter to continue (only in step runner view)
+    if (stepRunnerView.classList.contains('active') && 
+        !continueButton.disabled && 
+        stepCard.style.display !== 'none') {
+      continueButton.click();
+      e.preventDefault();
+    }
+  }
+}
+
+// Handle article search
+function handleSearch(e) {
+  const query = e.target.value.toLowerCase().trim();
+  
+  if (!query) {
+    // Show all articles
+    renderArticleList();
+    return;
+  }
+  
+  // Filter articles
+  const allArticles = kb.getAllArticles();
+  const filtered = allArticles.filter(article => {
+    return article.title.toLowerCase().includes(query) ||
+           article.summary.toLowerCase().includes(query) ||
+           article.tags.some(tag => tag.toLowerCase().includes(query)) ||
+           article.keywords.some(kw => kw.toLowerCase().includes(query));
+  });
+  
+  // Render filtered list
+  articleList.innerHTML = '';
+  filtered.forEach(article => {
+    const articleItem = document.createElement('div');
+    articleItem.className = 'article-item';
+    articleItem.innerHTML = `
+      <h3>${article.title}</h3>
+      <p>${article.summary}</p>
+      <div class="article-tags">
+        ${article.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+      </div>
+    `;
+    articleItem.addEventListener('click', () => selectArticle(article.id));
+    articleList.appendChild(articleItem);
+  });
+  
+  if (filtered.length === 0) {
+    articleList.innerHTML = '<p style="padding: 16px; text-align: center; color: var(--text-secondary);">No articles found</p>';
+  }
 }
 
 // Initialize on load

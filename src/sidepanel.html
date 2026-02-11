@@ -22,15 +22,24 @@
 
     <!-- Step Runner View -->
     <div id="step-runner-view" class="view">
-      <header>
-        <h1 id="article-title">Article Title</h1>
-        <button id="reset-button" class="btn btn-secondary">Reset</button>
+      <!-- Compact Header with Search and Progress -->
+      <header class="compact-header">
+        <div class="header-search">
+          <input 
+            type="search" 
+            id="article-search" 
+            placeholder="Search articles..."
+            class="search-input"
+          />
+        </div>
+        <div class="header-info">
+          <div class="article-name" id="article-title">Article Title</div>
+          <div class="step-progress" id="step-progress">Step 1 of 5</div>
+        </div>
+        <button id="reset-button" class="btn-icon" title="Reset">
+          <span>↺</span>
+        </button>
       </header>
-
-      <!-- Step Counter -->
-      <div id="step-counter" class="step-counter">
-        <!-- Will show "This solution has X steps" -->
-      </div>
 
       <!-- Skipped Steps Banner -->
       <div id="skipped-steps-banner" class="skipped-steps-banner" style="display: none;">
@@ -39,18 +48,14 @@
 
       <!-- Step Card -->
       <div id="step-card" class="step-card">
-        <div class="step-header">
-          <h2 id="step-number">Step 1</h2>
-        </div>
-        
         <div class="step-content">
-          <div class="step-text" id="step-text">
+          <div class="step-text-large" id="step-text">
             <!-- Step text goes here -->
           </div>
           
-          <div class="expected-result" id="expected-result-container" style="display: none;">
-            <strong>Expected Result:</strong>
-            <p id="expected-result"></p>
+          <div class="expected-outcome" id="expected-result-container" style="display: none;">
+            <div class="outcome-label">Expected Outcome</div>
+            <div class="outcome-text" id="expected-result"></div>
           </div>
           
           <details class="say-to-customer" id="say-to-customer-container" style="display: none;">
@@ -60,12 +65,24 @@
         </div>
 
         <div class="step-actions">
-          <button id="back-button" class="btn btn-secondary">← Back</button>
-          <button id="continue-button" class="btn btn-primary">Continue →</button>
-          <button id="didnt-work-button" class="btn btn-warning">⚠️ This didn't work</button>
-          <button id="open-article-button" class="btn btn-secondary">📄 Open Full Article</button>
+          <button id="continue-button" class="btn btn-primary btn-large">
+            Continue →
+            <span class="keyboard-hint">Enter</span>
+          </button>
+          <div class="action-row">
+            <button id="back-button" class="btn btn-secondary">← Back</button>
+            <button id="didnt-work-button" class="btn btn-warning">This didn't work</button>
+          </div>
         </div>
       </div>
+
+      <!-- Collapsible Full Article View -->
+      <details id="full-article-section" class="full-article-collapsible">
+        <summary class="article-toggle">📄 View Full Article</summary>
+        <div class="article-content" id="full-article-content-inline">
+          <!-- Full article content will be shown here -->
+        </div>
+      </details>
 
       <!-- Completion View -->
       <div id="completion-view" style="display: none;">
