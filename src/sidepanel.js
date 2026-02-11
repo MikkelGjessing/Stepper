@@ -2,7 +2,7 @@
 // Orchestrates UI interactions and module coordination
 
 // Import modules
-import { FeatureFlags, isFeatureEnabled } from './modules/config.js';
+import { FeatureFlags, isFeatureEnabled, setFeatureFlag } from './modules/config.js';
 import { MockRetrievalProvider } from './modules/retrieval.js';
 import { mockArticles } from './modules/kb.mock.js';
 import { StepRunner } from './modules/stepRunner.js';
@@ -15,6 +15,7 @@ import {
   renderFailureNote,
   populateFullArticle,
   updateStepProgress,
+  renderSteppingStones,
   toggleElement,
   clearElement,
   escapeHtml
@@ -22,6 +23,7 @@ import {
 
 // Constants
 const MAX_FALLBACK_QUERY_LENGTH = 50; // Maximum characters for fallback search query
+const THEME_STORAGE_KEY = 'stepper_playful_theme_enabled';
 
 // Initialize modules
 const retrieval = new MockRetrievalProvider(mockArticles);
@@ -30,6 +32,7 @@ const pageScanner = createPageScanner('default'); // Disabled by default
 let currentArticle = null;
 let scannedPageContent = null; // Store scanned page content
 let extractedContext = new Map(); // Store extracted label-value pairs from page scan
+let previousStepIndex = -1; // Track previous step for animation
 
 // DOM Elements
 const articleSelectionView = document.getElementById('article-selection-view');
@@ -37,6 +40,7 @@ const stepRunnerView = document.getElementById('step-runner-view');
 const articleList = document.getElementById('article-list');
 const articleTitle = document.getElementById('article-title');
 const stepProgress = document.getElementById('step-progress');
+const steppingStonesContainer = document.getElementById('stepping-stones-container');
 const articleSearch = document.getElementById('article-search');
 const skippedStepsBanner = document.getElementById('skipped-steps-banner');
 const stepCard = document.getElementById('step-card');
@@ -57,6 +61,7 @@ const backButton = document.getElementById('back-button');
 const didntWorkButton = document.getElementById('didnt-work-button');
 const resetButton = document.getElementById('reset-button');
 const backToArticlesButton = document.getElementById('back-to-articles');
+const themeToggleButton = document.getElementById('theme-toggle-button');
 
 // Modals
 const failureModal = document.getElementById('failure-modal');
@@ -70,6 +75,9 @@ const failureNote = document.getElementById('failure-note');
 async function init() {
   // Log feature flags
   console.log('[Stepper] Feature flags:', FeatureFlags);
+  
+  // Load theme preference from localStorage
+  loadThemePreference();
   
   // Initialize page scanner if enabled
   if (isFeatureEnabled('ENABLE_PAGE_SCAN')) {
@@ -245,7 +253,30 @@ async function selectArticle(articleId) {
 function updateStepProgressIndicator() {
   const state = stepRunner.getState();
   const totalSteps = stepRunner.getTotalSteps(currentArticle);
-  updateStepProgress(stepProgress, state.currentStepIndex + 1, totalSteps);
+  const currentStep = state.currentStepIndex + 1;
+  
+  // Check if playful theme is enabled
+  if (isFeatureEnabled('ENABLE_PLAYFUL_THEME')) {
+    // Show stepping stones, hide text
+    stepProgress.classList.add('hidden');
+    steppingStonesContainer.classList.add('active');
+    
+    // Determine if we should animate (stepped forward)
+    const shouldAnimate = previousStepIndex >= 0 && state.currentStepIndex > previousStepIndex;
+    
+    // Render stepping stones with animation
+    renderSteppingStones(steppingStonesContainer, currentStep, totalSteps, shouldAnimate);
+    
+    // Update previous step index
+    previousStepIndex = state.currentStepIndex;
+  } else {
+    // Show text, hide stepping stones
+    stepProgress.classList.remove('hidden');
+    steppingStonesContainer.classList.remove('active');
+    
+    // Update text progress
+    updateStepProgress(stepProgress, currentStep, totalSteps);
+  }
 }
 
 // Populate inline full article content
@@ -484,6 +515,7 @@ function setupEventListeners() {
   didntWorkButton.addEventListener('click', handleDidntWork);
   resetButton.addEventListener('click', handleReset);
   backToArticlesButton.addEventListener('click', handleBackToArticles);
+  themeToggleButton.addEventListener('click', handleThemeToggle);
   
   // Search functionality
   articleSearch.addEventListener('input', handleSearch);
@@ -555,6 +587,53 @@ async function handleSearch(e) {
   
   if (filtered.length === 0) {
     articleList.innerHTML = '<p style="padding: 16px; text-align: center; color: var(--text-secondary);">No articles found</p>';
+  }
+}
+
+// Handle theme toggle
+function handleThemeToggle() {
+  const currentTheme = isFeatureEnabled('ENABLE_PLAYFUL_THEME');
+  const newTheme = !currentTheme;
+  
+  // Toggle theme
+  setFeatureFlag('ENABLE_PLAYFUL_THEME', newTheme);
+  
+  // Save preference to localStorage
+  saveThemePreference(newTheme);
+  
+  // Update UI
+  updateStepProgressIndicator();
+  
+  // Show notification
+  const message = newTheme 
+    ? '🎨 Playful theme enabled! Watch the boy jump across stepping stones!'
+    : '📋 Classic theme enabled. Using text progress indicator.';
+  showNotification(message);
+  
+  console.log('[Stepper] Theme toggled:', newTheme ? 'Playful' : 'Classic');
+}
+
+// Load theme preference from localStorage
+function loadThemePreference() {
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved !== null) {
+      const enabled = saved === 'true';
+      setFeatureFlag('ENABLE_PLAYFUL_THEME', enabled);
+      console.log('[Stepper] Loaded theme preference:', enabled ? 'Playful' : 'Classic');
+    }
+  } catch (error) {
+    console.warn('[Stepper] Could not load theme preference:', error);
+  }
+}
+
+// Save theme preference to localStorage
+function saveThemePreference(enabled) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, enabled.toString());
+    console.log('[Stepper] Saved theme preference:', enabled ? 'Playful' : 'Classic');
+  } catch (error) {
+    console.warn('[Stepper] Could not save theme preference:', error);
   }
 }
 

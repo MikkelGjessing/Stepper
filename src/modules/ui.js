@@ -196,6 +196,86 @@ export function updateStepProgress(element, current, total) {
 }
 
 /**
+ * Render stepping stones progress indicator
+ * @param {HTMLElement} container - Container element for stepping stones
+ * @param {number} current - Current step (1-indexed)
+ * @param {number} total - Total steps
+ * @param {boolean} animate - Whether to animate the boy jumping
+ */
+export function renderSteppingStones(container, current, total, animate = false) {
+  // Clear container
+  container.innerHTML = '';
+  
+  // Calculate stone positions
+  const containerWidth = Math.min(total * 50, 350); // Max 350px width
+  const stoneSpacing = containerWidth / Math.max(total - 1, 1);
+  
+  // Create stones
+  for (let i = 0; i < total; i++) {
+    const stone = document.createElement('div');
+    stone.className = 'stepping-stone';
+    
+    // Determine stone state
+    if (i < current - 1) {
+      stone.classList.add('completed');
+    } else if (i === current - 1) {
+      stone.classList.add('current');
+    } else {
+      stone.classList.add('upcoming');
+    }
+    
+    // Position stone
+    stone.style.left = `${i * stoneSpacing}px`;
+    
+    // Create stone SVG
+    stone.innerHTML = `
+      <svg class="stone-shape" viewBox="0 0 40 30" preserveAspectRatio="xMidYMid meet">
+        <ellipse cx="20" cy="15" rx="18" ry="13" />
+      </svg>
+    `;
+    
+    container.appendChild(stone);
+  }
+  
+  // Create and position the boy character
+  const boy = document.createElement('div');
+  boy.className = 'boy-character';
+  if (animate) {
+    boy.classList.add('jumping');
+    // Remove animation class after animation completes
+    setTimeout(() => boy.classList.remove('jumping'), 400);
+  }
+  
+  // Position boy on current stone
+  const currentStonePosition = (current - 1) * stoneSpacing;
+  boy.style.left = `${currentStonePosition}px`;
+  
+  // Create boy SVG (simple cartoon character)
+  boy.innerHTML = `
+    <svg viewBox="0 0 30 45" xmlns="http://www.w3.org/2000/svg">
+      <!-- Head -->
+      <circle class="boy-head" cx="15" cy="8" r="6" />
+      
+      <!-- Body (shirt) -->
+      <rect class="boy-body" x="10" y="14" width="10" height="12" rx="2" />
+      
+      <!-- Shorts -->
+      <rect class="boy-shorts" x="10" y="26" width="10" height="8" rx="1" />
+      
+      <!-- Arms -->
+      <line class="boy-limbs" x1="10" y1="16" x2="5" y2="22" />
+      <line class="boy-limbs" x1="20" y1="16" x2="25" y2="22" />
+      
+      <!-- Legs -->
+      <line class="boy-limbs" x1="12" y1="34" x2="9" y2="42" />
+      <line class="boy-limbs" x1="18" y1="34" x2="21" y2="42" />
+    </svg>
+  `;
+  
+  container.appendChild(boy);
+}
+
+/**
  * Show/hide element
  * @param {HTMLElement} element - Element to show/hide
  * @param {boolean} show - True to show, false to hide

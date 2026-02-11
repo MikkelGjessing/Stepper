@@ -723,3 +723,144 @@ header p {
     width: 100%;
   }
 }
+
+/* ============================================
+   STEPPING STONES PLAYFUL THEME
+   ============================================ */
+
+/* Container for stepping stones */
+.stepping-stones-container {
+  display: none; /* Hidden by default, shown when playful theme enabled */
+  position: relative;
+  height: 60px;
+  margin: var(--spacing-sm) 0;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.stepping-stones-container.active {
+  display: block;
+}
+
+/* Hide text progress when playful theme is active */
+.step-progress.hidden {
+  display: none;
+}
+
+/* Individual stepping stone */
+.stepping-stone {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 30px;
+  transition: all 0.3s ease;
+}
+
+/* Stone SVG styling */
+.stone-shape {
+  width: 100%;
+  height: 100%;
+  fill: #d0d0d0; /* Default faded stone */
+  stroke: #999;
+  stroke-width: 1.5;
+  transition: all 0.3s ease;
+}
+
+/* Completed stone - solid appearance */
+.stepping-stone.completed .stone-shape {
+  fill: #4a90e2;
+  stroke: #2c5aa0;
+}
+
+/* Current stone - highlighted */
+.stepping-stone.current .stone-shape {
+  fill: #5cb85c;
+  stroke: #4cae4c;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+}
+
+/* Upcoming stone - faded */
+.stepping-stone.upcoming .stone-shape {
+  fill: #e8e8e8;
+  stroke: #ccc;
+  opacity: 0.6;
+}
+
+/* Cartoon boy character */
+.boy-character {
+  position: absolute;
+  width: 30px;
+  height: 45px;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  transition: left 0.4s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+/* Jump animation */
+.boy-character.jumping {
+  animation: jump 0.4s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+@keyframes jump {
+  0% {
+    transform: translateX(-50%) translateY(0);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-20px);
+  }
+  100% {
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Boy SVG styling - simple stick figure in shorts */
+.boy-body {
+  fill: #ff9800; /* Orange shirt */
+  stroke: #e65100;
+  stroke-width: 1;
+}
+
+.boy-shorts {
+  fill: #2196f3; /* Blue shorts */
+  stroke: #1565c0;
+  stroke-width: 1;
+}
+
+.boy-head {
+  fill: #ffd0a0; /* Skin tone */
+  stroke: #d49872;
+  stroke-width: 1;
+}
+
+.boy-limbs {
+  stroke: #ffd0a0;
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+}
+
+/* Header controls container */
+.header-controls {
+  display: flex;
+  gap: var(--spacing-xs);
+  align-items: center;
+}
+
+/* Theme toggle specific styling */
+#theme-toggle-button {
+  transition: transform 0.2s ease;
+}
+
+#theme-toggle-button:hover {
+  transform: scale(1.1);
+}
+
+/* Playful theme indicator */
+.playful-theme-active #theme-toggle-icon::after {
+  content: ' ON';
+  font-size: 8px;
+  vertical-align: super;
+}

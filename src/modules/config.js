@@ -20,6 +20,14 @@ export const FeatureFlags = {
    * Default: false (disabled for security and performance)
    */
   ENABLE_PAGE_SCAN: false,
+
+  /**
+   * Enable playful stepping stones theme
+   * When enabled, shows a cartoon boy jumping across stepping stones
+   * instead of the standard "Step X of Y" text indicator
+   * Default: true (can be toggled by user)
+   */
+  ENABLE_PLAYFUL_THEME: true,
 };
 
 /**
