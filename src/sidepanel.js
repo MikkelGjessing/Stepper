@@ -176,7 +176,7 @@ async function handleUserInput() {
   } else if (articles.length === 1) {
     // Single match - start directly
     const article = articles[0];
-    addAssistantMessage(`I found a solution: "${article.title}". This solution has ${article.steps.length} steps. Let's begin!`);
+    addAssistantMessage(`I found a solution: "${article.title}". This solution has ${(article.steps || []).length} steps. Let's begin!`);
     
     // Start article
     await selectArticleInChat(article.id);
@@ -212,7 +212,7 @@ function createArticleCard(article) {
   
   const tags = document.createElement('div');
   tags.className = 'article-tags';
-  article.tags.slice(0, 3).forEach(tag => {
+  (article.tags || []).slice(0, 3).forEach(tag => {
     const tagSpan = document.createElement('span');
     tagSpan.className = 'tag';
     tagSpan.textContent = tag;
