@@ -19,6 +19,9 @@ import {
   clearElement
 } from './modules/ui.js';
 
+// Constants
+const MAX_FALLBACK_QUERY_LENGTH = 50; // Maximum characters for fallback search query
+
 // Initialize modules
 const retrieval = new MockRetrievalProvider(mockArticles);
 const stepRunner = new StepRunner();
@@ -151,8 +154,8 @@ function extractSearchQuery(content) {
     return foundKeywords.slice(0, 2).join(' ');
   }
   
-  // Fallback: first 50 characters
-  return text.substring(0, 50).trim();
+  // Fallback: first MAX_FALLBACK_QUERY_LENGTH characters
+  return text.substring(0, MAX_FALLBACK_QUERY_LENGTH).trim();
 }
 
 // Render article list

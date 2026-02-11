@@ -136,8 +136,8 @@ export class DefaultPageScanner extends PageScanner {
       }
     ];
 
-    // Return a random scenario for variety (but deterministic within session)
-    const scenario = mockScenarios[0]; // Use first scenario for now
+    // Return first scenario for deterministic behavior
+    const scenario = mockScenarios[0];
     
     return {
       ...scenario,
