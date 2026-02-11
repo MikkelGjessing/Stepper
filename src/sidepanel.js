@@ -16,8 +16,7 @@ kb.loadArticles(mockArticles);
 // Notification helper function
 function showNotification(message, options = {}) {
   const { 
-    type = 'info',  // 'info', 'success', 'warning', 'error'
-    duration = 3000,
+    type = 'info',  // 'info', 'success', 'warning', 'error' - for future use
     requireConfirm = false 
   } = options;
   
@@ -27,6 +26,7 @@ function showNotification(message, options = {}) {
   
   // For now, use alert for simplicity
   // TODO: Replace with toast notification system for better UX
+  // The 'type' parameter can be used for styling different notification types
   alert(message);
   return true;
 }
