@@ -350,15 +350,6 @@ header p {
   line-height: 1.5;
   color: var(--text-primary);
 }
-  display: block;
-  margin-bottom: var(--spacing-xs);
-  color: var(--primary-color);
-}
-
-.expected-result p {
-  margin: 0;
-  font-size: 14px;
-}
 
 .say-to-customer {
   margin-top: var(--spacing-lg);

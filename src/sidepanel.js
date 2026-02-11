@@ -70,6 +70,17 @@ const cancelFailure = document.getElementById('cancel-failure');
 const failureForm = document.getElementById('failure-form');
 const failureReason = document.getElementById('failure-reason');
 const failureNote = document.getElementById('failure-note');
+const fullArticleModal = document.getElementById('full-article-modal');
+const closeArticleModal = document.getElementById('close-article-modal');
+const fullArticleTitle = document.getElementById('full-article-title');
+const fullArticleContent = document.getElementById('full-article-content');
+
+const failureModal = document.getElementById('failure-modal');
+const closeFailureModal = document.getElementById('close-failure-modal');
+const cancelFailure = document.getElementById('cancel-failure');
+const failureForm = document.getElementById('failure-form');
+const failureReason = document.getElementById('failure-reason');
+const failureNote = document.getElementById('failure-note');
 
 // Initialize UI
 function init() {
@@ -430,94 +441,6 @@ function populateFullArticleInline() {
     `;
     fullArticleContentInline.appendChild(escalationSection);
   }
-}
-
-// Open full article modal
-function openFullArticle() {
-  if (!currentArticle) return;
-  
-  fullArticleTitle.textContent = currentArticle.title;
-  fullArticleContent.innerHTML = '';
-  
-  // Add summary
-  const summarySection = document.createElement('div');
-  summarySection.className = 'article-section';
-  summarySection.innerHTML = `
-    <h3>Summary</h3>
-    <p>${currentArticle.summary}</p>
-  `;
-  fullArticleContent.appendChild(summarySection);
-  
-  // Add prechecks if available
-  if (currentArticle.prechecks && currentArticle.prechecks.length > 0) {
-    const prechecksSection = document.createElement('div');
-    prechecksSection.className = 'article-section';
-    prechecksSection.innerHTML = `
-      <h3>Pre-checks</h3>
-      <ul>
-        ${currentArticle.prechecks.map(check => `<li>${check}</li>`).join('')}
-      </ul>
-    `;
-    fullArticleContent.appendChild(prechecksSection);
-  }
-  
-  // Add main steps
-  const stepsSection = document.createElement('div');
-  stepsSection.className = 'article-section';
-  stepsSection.innerHTML = `<h3>Steps</h3>`;
-  
-  currentArticle.steps.forEach((step, index) => {
-    const stepItem = document.createElement('div');
-    stepItem.className = 'step-item';
-    stepItem.innerHTML = `
-      <strong>Step ${index + 1}:</strong> ${step.text}
-      ${step.expectedResult ? `<br><em>Expected: ${step.expectedResult}</em>` : ''}
-    `;
-    stepsSection.appendChild(stepItem);
-  });
-  
-  fullArticleContent.appendChild(stepsSection);
-  
-  // Add fallbacks if available
-  if (currentArticle.fallbacks && currentArticle.fallbacks.length > 0) {
-    const fallbacksSection = document.createElement('div');
-    fallbacksSection.className = 'article-section';
-    fallbacksSection.innerHTML = `<h3>Fallback Procedures</h3>`;
-    
-    currentArticle.fallbacks.forEach(fallback => {
-      const fallbackItem = document.createElement('div');
-      fallbackItem.innerHTML = `<strong>${fallback.condition}</strong>`;
-      const fallbackSteps = document.createElement('ol');
-      fallback.steps.forEach(step => {
-        const li = document.createElement('li');
-        li.textContent = step.text;
-        fallbackSteps.appendChild(li);
-      });
-      fallbackItem.appendChild(fallbackSteps);
-      fallbacksSection.appendChild(fallbackItem);
-    });
-    
-    fullArticleContent.appendChild(fallbacksSection);
-  }
-  
-  // Add escalation info if available
-  if (currentArticle.escalation) {
-    const escalationSection = document.createElement('div');
-    escalationSection.className = 'article-section';
-    escalationSection.innerHTML = `
-      <h3>Escalation</h3>
-      <p><strong>When:</strong> ${currentArticle.escalation.when}</p>
-      <p><strong>Target:</strong> ${currentArticle.escalation.target}</p>
-    `;
-    fullArticleContent.appendChild(escalationSection);
-  }
-  
-  fullArticleModal.style.display = 'flex';
-}
-
-// Close full article modal
-function closeFullArticle() {
-  fullArticleModal.style.display = 'none';
 }
 
 // Handle reset
