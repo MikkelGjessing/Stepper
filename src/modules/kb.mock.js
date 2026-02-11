@@ -19,7 +19,6 @@ export const mockArticles = [
         id: "step1",
         text: "Check the outbox for stuck emails",
         expectedResult: "Outbox should be empty or show pending emails",
-        sayToCustomer: "Let me check if there are any emails stuck in your outbox"
       },
       {
         id: "step2",
@@ -30,7 +29,6 @@ export const mockArticles = [
         id: "step3",
         text: "Check App Password is correctly configured (if using 2FA)",
         expectedResult: "App password is set up and valid",
-        sayToCustomer: "We need to verify your app password is set up correctly for secure access"
       },
       {
         id: "step4",
@@ -41,7 +39,6 @@ export const mockArticles = [
         id: "step5",
         text: "Test sending a simple email using Terminal ID for tracking",
         expectedResult: "Email should appear in inbox within 1 minute with Terminal ID in headers",
-        sayToCustomer: "Please try sending a test email to yourself now"
       },
       {
         id: "step6",
@@ -94,7 +91,6 @@ export const mockArticles = [
         id: "step1",
         text: "Check the outbox for stuck emails",
         expectedResult: "Outbox should be empty or show pending emails",
-        sayToCustomer: "Let me check if there are any emails stuck in your outbox"
       },
       {
         id: "step2",
@@ -105,7 +101,6 @@ export const mockArticles = [
         id: "step3",
         text: "Check mailbox size is not at quota",
         expectedResult: "Mailbox usage is below 95%",
-        sayToCustomer: "I need to verify your mailbox isn't full"
       },
       {
         id: "step4",
@@ -177,13 +172,11 @@ export const mockArticles = [
         id: "step1",
         text: "Check airplane mode is OFF",
         expectedResult: "Airplane mode toggle is disabled",
-        sayToCustomer: "Let's make sure airplane mode isn't accidentally turned on"
       },
       {
         id: "step2",
         text: "Verify WiFi adapter is enabled in Network Settings",
         expectedResult: "WiFi adapter shows as 'Enabled'",
-        sayToCustomer: "I'll help you check if your WiFi adapter is enabled"
       },
       {
         id: "step3",
@@ -199,7 +192,6 @@ export const mockArticles = [
         id: "step5",
         text: "Restart router and modem (power cycle for 30 seconds)",
         expectedResult: "Devices restart and lights stabilize",
-        sayToCustomer: "We're going to restart your network equipment. This will take about 2 minutes"
       },
       {
         id: "step6",
@@ -337,7 +329,6 @@ export const mockArticles = [
         id: "step1",
         text: "Check available disk space",
         expectedResult: "At least 1GB free space available",
-        sayToCustomer: "Let me verify you have enough disk space for the installation"
       },
       {
         id: "step2",
