@@ -72,6 +72,17 @@ Stepper/
 
 Stepper uses feature flags to control optional functionality. These are configured in `src/modules/config.js`:
 
+### ENABLE_PLAYFUL_THEME
+- **Default**: `true`
+- **Purpose**: Enable playful stepping stones progress indicator
+- **When enabled**: 
+  - Shows a cartoon boy jumping across stepping stones
+  - Animated jump when advancing to next step
+  - Visual stone states (completed: blue, current: green, upcoming: faded)
+  - Toggle via 🎨 button in header
+- **When disabled**: Shows classic "Step X of Y" text indicator
+- See [STEPPING_STONES_THEME.md](STEPPING_STONES_THEME.md) for details
+
 ### ENABLE_LLM_ASSIST
 - **Default**: `false`
 - **Purpose**: Enable AI-powered assistance features (not yet implemented)
@@ -117,6 +128,7 @@ To enable a feature flag, edit `src/modules/config.js`:
 
 ```javascript
 export const FeatureFlags = {
+  ENABLE_PLAYFUL_THEME: true,  // Toggle playful stepping stones theme
   ENABLE_LLM_ASSIST: false,
   ENABLE_PAGE_SCAN: true,  // Change to true to enable
 };
@@ -127,12 +139,19 @@ Or use the API programmatically:
 ```javascript
 import { setFeatureFlag } from './modules/config.js';
 
+// Enable playful theme
+setFeatureFlag('ENABLE_PLAYFUL_THEME', true);
+
 // Enable page scanning
 setFeatureFlag('ENABLE_PAGE_SCAN', true);
 
 // Disable LLM assist
 setFeatureFlag('ENABLE_LLM_ASSIST', false);
 ```
+
+Or toggle themes via the UI:
+- Click the 🎨 button in the header to toggle between playful and classic themes
+- Preference is saved to localStorage and persists across sessions
 
 ## Knowledge Base Schema
 

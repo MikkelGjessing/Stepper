@@ -4,6 +4,7 @@ test-fallback.mjs
 test-feature-flags.html
 test-feature-flags.mjs
 test-context-extraction.mjs
+test-theme-preview.html
 demo-*.html
 
 # Temporary files
