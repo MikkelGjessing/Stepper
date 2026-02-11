@@ -8,35 +8,14 @@
 </head>
 <body>
   <div id="app">
-    <!-- Article Selection View -->
-    <div id="article-selection-view" class="view active">
-      <header>
-        <h1>📋 Knowledge Base</h1>
-        <p>Select an article to begin</p>
-      </header>
-      
-      <div id="article-list" class="article-list">
-        <!-- Articles will be populated here -->
-      </div>
-    </div>
-
-    <!-- Step Runner View -->
-    <div id="step-runner-view" class="view">
-      <!-- Compact Header with Search and Progress -->
-      <header class="compact-header">
-        <div class="header-search">
-          <input 
-            type="search" 
-            id="article-search" 
-            placeholder="Search articles..."
-            class="search-input"
-          />
-        </div>
+    <!-- Chat View (Main Interface) -->
+    <div id="chat-view" class="view active">
+      <!-- Compact Header -->
+      <header class="chat-header">
         <div class="header-info">
-          <div class="article-name" id="article-title">Article Title</div>
-          <div class="step-progress" id="step-progress">Step 1 of 5</div>
-          <!-- Stepping Stones Progress Indicator -->
-          <div id="stepping-stones-container" class="stepping-stones-container">
+          <h1>💬 Stepper Assistant</h1>
+          <!-- Stepping Stones Progress Indicator (shown when in step mode) -->
+          <div id="stepping-stones-container" class="stepping-stones-container" style="display: none;">
             <!-- Stones will be rendered here dynamically -->
           </div>
         </div>
@@ -50,88 +29,49 @@
         </div>
       </header>
 
-      <!-- Skipped Steps Banner -->
-      <div id="skipped-steps-banner" class="skipped-steps-banner" style="display: none;">
-        <!-- Will show "Skipped N steps already completed" -->
+      <!-- Chat Messages Container -->
+      <div id="chat-messages" class="chat-messages">
+        <!-- Messages will be appended here -->
       </div>
 
-      <!-- Step Card -->
-      <div id="step-card" class="step-card">
-        <div class="step-content">
-          <div class="step-text-large" id="step-text">
-            <!-- Step text goes here -->
-          </div>
-          
-          <div class="expected-outcome" id="expected-result-container" style="display: none;">
-            <div class="outcome-label">Expected Outcome</div>
-            <div class="outcome-text" id="expected-result"></div>
-          </div>
-          
-          <details class="say-to-customer" id="say-to-customer-container" style="display: none;">
-            <summary>💬 Say to Customer</summary>
-            <p id="say-to-customer"></p>
-          </details>
-        </div>
-
-        <div class="step-actions">
-          <button id="continue-button" class="btn btn-primary btn-large">
-            Continue →
-            <span class="keyboard-hint">Enter</span>
-          </button>
-          <div class="action-row">
-            <button id="back-button" class="btn btn-secondary">← Back</button>
-            <button id="didnt-work-button" class="btn btn-warning">This didn't work</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Collapsible Full Article View -->
-      <details id="full-article-section" class="full-article-collapsible">
-        <summary class="article-toggle">📄 View Full Article</summary>
-        <div class="article-content" id="full-article-content-inline">
-          <!-- Full article content will be shown here -->
-        </div>
-      </details>
-
-      <!-- Completion View -->
-      <div id="completion-view" style="display: none;">
-        <div class="completion-card">
-          <h2>✅ Process Complete</h2>
-          <p>You have completed all steps in this solution.</p>
-          
-          <div class="completion-summary">
-            <h3>Summary</h3>
-            <div id="completed-steps-list">
-              <!-- Completed steps will be listed here -->
-            </div>
-            
-            <div id="failure-notes" style="display: none;">
-              <h3>⚠️ Failure Notes</h3>
-              <div id="failure-notes-list">
-                <!-- Failure notes will be listed here -->
-              </div>
-            </div>
-          </div>
-          
-          <button id="back-to-articles" class="btn btn-primary">← Back to Articles</button>
-        </div>
+      <!-- Chat Input -->
+      <div id="chat-input-container" class="chat-input-container">
+        <input 
+          type="text" 
+          id="chat-input" 
+          placeholder="Describe the issue..."
+          class="chat-input"
+        />
+        <button id="send-button" class="btn btn-primary">Send</button>
       </div>
     </div>
 
-    <!-- Full Article Modal -->
-    <div id="full-article-modal" class="modal" style="display: none;">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h2 id="full-article-title">Article Title</h2>
-          <button id="close-article-modal" class="close-button">×</button>
+    <!-- Hidden Step Runner View (for backward compatibility) -->
+    <div id="step-runner-view" class="view" style="display: none;">
+      <!-- Keep header structure for compatibility -->
+      <header class="compact-header" style="display: none;">
+        <div class="header-search">
+          <input 
+            type="search" 
+            id="article-search" 
+            placeholder="Search articles..."
+            class="search-input"
+          />
         </div>
-        <div class="modal-body" id="full-article-content">
-          <!-- Full article content will be shown here -->
+        <div class="header-info">
+          <div class="article-name" id="article-title">Article Title</div>
+          <div class="step-progress" id="step-progress">Step 1 of 5</div>
         </div>
-      </div>
+      </header>
+
+      <!-- Hidden elements for backward compatibility -->
+      <div id="skipped-steps-banner" class="skipped-steps-banner" style="display: none;"></div>
+      <div id="step-card" class="step-card" style="display: none;"></div>
+      <details id="full-article-section" class="full-article-collapsible" style="display: none;"></details>
+      <div id="completion-view" style="display: none;"></div>
     </div>
 
-    <!-- Failure Modal -->
+    <!-- Modals -->
     <div id="failure-modal" class="modal" style="display: none;">
       <div class="modal-content small">
         <div class="modal-header">

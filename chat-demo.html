@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Flow Demo</title>
+  <style>
+    /* Inline styles from sidepanel.css for demo */
+    :root {
+      --primary-color: #0066cc;
+      --secondary-color: #6c757d;
+      --warning-color: #ffc107;
+      --background: #ffffff;
+      --surface: #f8f9fa;
+      --border: #dee2e6;
+      --text-primary: #212529;
+      --text-secondary: #6c757d;
+      --spacing-xs: 4px;
+      --spacing-sm: 8px;
+      --spacing-md: 12px;
+      --spacing-lg: 16px;
+      --radius: 8px;
+      --radius-sm: 4px;
+    }
+    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text-primary);
+      background: var(--background);
+      width: 380px;
+      height: 600px;
+      margin: 20px auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .chat-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: var(--spacing-md);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    
+    .chat-header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 0;
+    }
+    
+    .header-controls {
+      display: flex;
+      gap: var(--spacing-sm);
+    }
+    
+    .btn-icon {
+      padding: var(--spacing-sm);
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 18px;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--spacing-md);
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-md);
+    }
+    
+    .chat-message {
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-xs);
+      animation: slideIn 0.3s ease-out;
+    }
+    
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .message-sender {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      padding: 0 var(--spacing-sm);
+    }
+    
+    .message-bubble {
+      max-width: 85%;
+      padding: var(--spacing-md);
+      border-radius: var(--radius);
+      word-wrap: break-word;
+    }
+    
+    .chat-message.agent {
+      align-items: flex-end;
+    }
+    
+    .chat-message.agent .message-bubble {
+      background: #e3f2fd;
+      border: 1px solid #bbdefb;
+    }
+    
+    .chat-message.assistant .message-bubble {
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+    
+    .step-text {
+      font-size: 14px;
+      line-height: 1.6;
+      margin-bottom: var(--spacing-md);
+    }
+    
+    .expected-outcome-inline {
+      margin-top: var(--spacing-sm);
+      padding: var(--spacing-sm);
+      background: #f0f9ff;
+      border-left: 3px solid var(--primary-color);
+      border-radius: var(--radius-sm);
+    }
+    
+    .outcome-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--primary-color);
+      margin-bottom: var(--spacing-xs);
+    }
+    
+    .outcome-text {
+      font-size: 13px;
+    }
+    
+    .step-actions-inline {
+      display: flex;
+      gap: var(--spacing-sm);
+      margin-top: var(--spacing-md);
+      flex-wrap: wrap;
+    }
+    
+    .btn {
+      padding: var(--spacing-sm) var(--spacing-md);
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: var(--primary-color);
+      color: white;
+    }
+    
+    .btn-secondary {
+      background: var(--secondary-color);
+      color: white;
+    }
+    
+    .btn-warning {
+      background: var(--warning-color);
+      color: #333;
+    }
+    
+    .chat-input-container {
+      display: flex;
+      gap: var(--spacing-sm);
+      padding: var(--spacing-md);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    
+    .chat-input {
+      flex: 1;
+      padding: var(--spacing-sm) var(--spacing-md);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+    }
+    
+    .article-card {
+      padding: var(--spacing-md);
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: var(--spacing-sm);
+    }
+    
+    .article-card:hover {
+      border-color: var(--primary-color);
+      background: #f0f8ff;
+      transform: translateX(4px);
+    }
+    
+    .article-card h4 {
+      font-size: 14px;
+      font-weight: 600;
+      margin: 0 0 var(--spacing-xs) 0;
+    }
+    
+    .article-card p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="chat-header">
+    <h1>💬 Stepper Assistant</h1>
+    <div class="header-controls">
+      <button class="btn-icon" title="Toggle playful theme">🎨</button>
+      <button class="btn-icon" title="Reset">↺</button>
+    </div>
+  </div>
+  
+  <div class="chat-messages">
+    <!-- Welcome message -->
+    <div class="chat-message assistant">
+      <div class="message-sender">Assistant</div>
+      <div class="message-bubble">
+        <p>Hello! I'm here to help you troubleshoot issues step by step. What problem are you experiencing?</p>
+      </div>
+    </div>
+    
+    <!-- User query -->
+    <div class="chat-message agent">
+      <div class="message-sender">You</div>
+      <div class="message-bubble">
+        <p>Email not sending</p>
+      </div>
+    </div>
+    
+    <!-- Article selection -->
+    <div class="chat-message assistant">
+      <div class="message-sender">Assistant</div>
+      <div class="message-bubble">
+        <p>I found 2 possible solutions. Please select the one that best matches your issue:</p>
+        <div class="article-card">
+          <h4>Email Not Sending - Gmail</h4>
+          <p>Troubleshoot Gmail email delivery issues</p>
+        </div>
+        <div class="article-card">
+          <h4>Email Not Sending - Outlook</h4>
+          <p>Troubleshoot Outlook email delivery issues</p>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Step display -->
+    <div class="chat-message assistant">
+      <div class="message-sender">Assistant</div>
+      <div class="message-bubble">
+        <p>Step 1 of 6:</p>
+        <div class="step-text">
+          Check the outbox for stuck emails
+        </div>
+        <div class="expected-outcome-inline">
+          <div class="outcome-label">Expected Outcome</div>
+          <div class="outcome-text">Outbox should be empty or show pending emails</div>
+        </div>
+        <div class="step-actions-inline">
+          <button class="btn btn-primary">Continue →</button>
+          <button class="btn btn-warning">This didn't work</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="chat-input-container">
+    <input type="text" class="chat-input" placeholder="Describe the issue..." />
+    <button class="btn btn-primary">Send</button>
+  </div>
+</body>
+</html>
