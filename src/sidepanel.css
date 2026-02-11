@@ -207,17 +207,36 @@ body {
   transform: translateX(4px);
 }
 
+.article-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-xs);
+}
+
 .article-card h4 {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
-  margin: 0 0 var(--spacing-xs) 0;
+  margin: 0;
+  flex: 1;
+}
+
+.article-score {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary-color);
+  background: #e7f3ff;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  margin-left: var(--spacing-sm);
+  white-space: nowrap;
 }
 
 .article-card p {
   font-size: 13px;
   color: var(--text-secondary);
-  margin: 0;
+  margin: var(--spacing-xs) 0 0 0;
 }
 
 .article-card .article-tags {

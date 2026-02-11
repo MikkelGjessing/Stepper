@@ -25,9 +25,9 @@ export const FeatureFlags = {
    * Enable playful stepping stones theme
    * When enabled, shows a cartoon boy jumping across stepping stones
    * instead of the standard "Step X of Y" text indicator
-   * Default: true (can be toggled by user)
+   * Default: false (disabled for minimal MVP)
    */
-  ENABLE_PLAYFUL_THEME: true,
+  ENABLE_PLAYFUL_THEME: false,
 };
 
 /**

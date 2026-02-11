@@ -9,29 +9,22 @@ import { StepRunner } from './modules/stepRunner.js';
 import { 
   showNotification, 
   formatReason,
-  renderSteppingStones,
   clearElement,
   escapeHtml
 } from './modules/ui.js';
-
-// Constants
-const THEME_STORAGE_KEY = 'stepper_playful_theme_enabled';
 
 // Initialize modules
 const retrieval = new MockRetrievalProvider(mockArticles);
 const stepRunner = new StepRunner();
 let currentArticle = null;
 let extractedContext = new Map(); // Store extracted label-value pairs from page scan
-let previousStepIndex = -1; // Track previous step for animation
 
 // DOM Elements
 const chatView = document.getElementById('chat-view');
 const chatMessages = document.getElementById('chat-messages');
 const chatInput = document.getElementById('chat-input');
 const sendButton = document.getElementById('send-button');
-const steppingStonesContainer = document.getElementById('stepping-stones-container');
 const resetButton = document.getElementById('reset-button');
-const themeToggleButton = document.getElementById('theme-toggle-button');
 
 // Modals
 const failureModal = document.getElementById('failure-modal');
@@ -48,9 +41,6 @@ let currentContinueButton = null;
 // Initialize UI
 async function init() {
   console.log('[Stepper] Feature flags:', FeatureFlags);
-  
-  // Load theme preference from localStorage
-  loadThemePreference();
   
   // Show welcome message
   showWelcomeMessage();
@@ -175,18 +165,18 @@ async function handleUserInput() {
     chatInput.focus();
   } else if (articles.length === 1) {
     // Single match - start directly
-    const article = articles[0];
-    addAssistantMessage(`I found a solution: "${article.title}". This solution has ${(article.steps || []).length} steps. Let's begin!`);
+    const result = articles[0];
+    addAssistantMessage(`I found a solution: "${result.article.title}". This solution has ${(result.article.steps || []).length} steps. Let's begin!`);
     
     // Start article
-    await selectArticleInChat(article.id);
+    await selectArticleInChat(result.article.id);
   } else {
-    // Multiple matches - show as cards
+    // Multiple matches - show as cards (top 3)
     const cardsContainer = document.createElement('div');
     cardsContainer.className = 'article-cards-container';
     
-    articles.slice(0, 5).forEach(article => {
-      const card = createArticleCard(article);
+    articles.slice(0, 3).forEach(result => {
+      const card = createArticleCard(result);
       cardsContainer.appendChild(card);
     });
     
@@ -197,14 +187,26 @@ async function handleUserInput() {
 
 /**
  * Create article card for selection
+ * @param {Object} result - Search result with article and score
  */
-function createArticleCard(article) {
+function createArticleCard(result) {
+  const { article, score } = result;
   const card = document.createElement('div');
   card.className = 'article-card';
   
+  const header = document.createElement('div');
+  header.className = 'article-card-header';
+  
   const title = document.createElement('h4');
   title.textContent = article.title;
-  card.appendChild(title);
+  header.appendChild(title);
+  
+  const scoreSpan = document.createElement('span');
+  scoreSpan.className = 'article-score';
+  scoreSpan.textContent = `Score: ${score}`;
+  header.appendChild(scoreSpan);
+  
+  card.appendChild(header);
   
   const summary = document.createElement('p');
   summary.textContent = article.summary;
@@ -235,36 +237,25 @@ async function selectArticleInChat(articleId) {
   stepRunner.startArticle(articleId, currentArticle);
   chatState = 'in-step';
   
-  // Show stepping stones
-  showSteppingStonesProgress();
+  const totalSteps = stepRunner.getTotalSteps(currentArticle);
+  addAssistantMessage(`This solution has ${totalSteps} steps. Let's begin!`);
   
   // Show first step
   showCurrentStepInChat();
 }
 
 /**
- * Show stepping stones progress indicator
+ * Show stepping stones progress indicator (disabled in minimal MVP)
  */
 function showSteppingStonesProgress() {
-  if (isFeatureEnabled('ENABLE_PLAYFUL_THEME')) {
-    steppingStonesContainer.style.display = 'block';
-    updateSteppingStonesInChat();
-  }
+  // Disabled for minimal MVP
 }
 
 /**
- * Update stepping stones indicator
+ * Update stepping stones indicator (disabled in minimal MVP)
  */
 function updateSteppingStonesInChat() {
-  const state = stepRunner.getState();
-  const totalSteps = stepRunner.getTotalSteps(currentArticle);
-  const currentStep = state.currentStepIndex + 1;
-  
-  if (isFeatureEnabled('ENABLE_PLAYFUL_THEME')) {
-    const shouldAnimate = previousStepIndex >= 0 && state.currentStepIndex > previousStepIndex;
-    renderSteppingStones(steppingStonesContainer, currentStep, totalSteps, shouldAnimate);
-    previousStepIndex = state.currentStepIndex;
-  }
+  // Disabled for minimal MVP
 }
 
 /**
@@ -278,9 +269,6 @@ function showCurrentStepInChat() {
     showCompletionInChat();
     return;
   }
-  
-  // Update stepping stones
-  updateSteppingStonesInChat();
   
   // Create step content
   const stepContent = document.createElement('div');
@@ -400,10 +388,6 @@ function showCompletionInChat() {
   chatInput.disabled = false;
   chatInput.placeholder = 'Describe another issue...';
   chatInput.focus();
-  
-  // Hide stepping stones
-  steppingStonesContainer.style.display = 'none';
-  previousStepIndex = -1;
 }
 
 // ==================== EVENT HANDLERS ====================
@@ -414,13 +398,9 @@ function handleReset() {
     stepRunner.reset();
     currentArticle = null;
     chatState = 'initial';
-    previousStepIndex = -1;
     
     // Clear chat messages
     clearElement(chatMessages);
-    
-    // Hide stepping stones
-    steppingStonesContainer.style.display = 'none';
     
     // Re-enable and clear input
     chatInput.disabled = false;
@@ -444,7 +424,6 @@ function setupEventListeners() {
   
   // Button listeners
   resetButton.addEventListener('click', handleReset);
-  themeToggleButton.addEventListener('click', handleThemeToggle);
   
   // Modal controls
   closeFailureModal.addEventListener('click', () => {
@@ -546,59 +525,6 @@ async function handleFailureSubmit(e) {
         'Issue recorded. No automated fallback available. Please escalate to appropriate support team.'
       );
     }
-  }
-}
-
-// Handle theme toggle
-function handleThemeToggle() {
-  const currentTheme = isFeatureEnabled('ENABLE_PLAYFUL_THEME');
-  const newTheme = !currentTheme;
-  
-  // Toggle theme
-  setFeatureFlag('ENABLE_PLAYFUL_THEME', newTheme);
-  
-  // Save preference to localStorage
-  saveThemePreference(newTheme);
-  
-  // Update UI if in stepping mode
-  if (chatState === 'in-step') {
-    if (newTheme) {
-      showSteppingStonesProgress();
-    } else {
-      steppingStonesContainer.style.display = 'none';
-    }
-  }
-  
-  // Show notification
-  const message = newTheme 
-    ? '🎨 Playful theme enabled! Watch the boy jump across stepping stones!'
-    : '📋 Classic theme disabled. Stepping stones hidden.';
-  showNotification(message);
-  
-  console.log('[Stepper] Theme toggled:', newTheme ? 'Playful' : 'Classic');
-}
-
-// Load theme preference from localStorage
-function loadThemePreference() {
-  try {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    if (saved !== null) {
-      const enabled = saved === 'true';
-      setFeatureFlag('ENABLE_PLAYFUL_THEME', enabled);
-      console.log('[Stepper] Loaded theme preference:', enabled ? 'Playful' : 'Classic');
-    }
-  } catch (error) {
-    console.warn('[Stepper] Could not load theme preference:', error);
-  }
-}
-
-// Save theme preference to localStorage
-function saveThemePreference(enabled) {
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, enabled.toString());
-    console.log('[Stepper] Saved theme preference:', enabled ? 'Playful' : 'Classic');
-  } catch (error) {
-    console.warn('[Stepper] Could not save theme preference:', error);
   }
 }
 
