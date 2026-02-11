@@ -59,22 +59,6 @@ const resetButton = document.getElementById('reset-button');
 const backToArticlesButton = document.getElementById('back-to-articles');
 
 // Modals
-const fullArticleModal = document.getElementById('full-article-modal');
-const closeArticleModal = document.getElementById('close-article-modal');
-const fullArticleTitle = document.getElementById('full-article-title');
-const fullArticleContent = document.getElementById('full-article-content');
-
-const failureModal = document.getElementById('failure-modal');
-const closeFailureModal = document.getElementById('close-failure-modal');
-const cancelFailure = document.getElementById('cancel-failure');
-const failureForm = document.getElementById('failure-form');
-const failureReason = document.getElementById('failure-reason');
-const failureNote = document.getElementById('failure-note');
-const fullArticleModal = document.getElementById('full-article-modal');
-const closeArticleModal = document.getElementById('close-article-modal');
-const fullArticleTitle = document.getElementById('full-article-title');
-const fullArticleContent = document.getElementById('full-article-content');
-
 const failureModal = document.getElementById('failure-modal');
 const closeFailureModal = document.getElementById('close-failure-modal');
 const cancelFailure = document.getElementById('cancel-failure');
@@ -535,8 +519,8 @@ function handleSearch(e) {
   const filtered = allArticles.filter(article => {
     return article.title.toLowerCase().includes(query) ||
            article.summary.toLowerCase().includes(query) ||
-           article.tags.some(tag => tag.toLowerCase().includes(query)) ||
-           article.keywords.some(kw => kw.toLowerCase().includes(query));
+           (article.tags || []).some(tag => tag.toLowerCase().includes(query)) ||
+           (article.keywords || []).some(kw => kw.toLowerCase().includes(query));
   });
   
   // Render filtered list
