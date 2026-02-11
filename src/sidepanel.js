@@ -2,6 +2,7 @@
 // Orchestrates UI interactions and module coordination
 
 // Import modules
+import { FeatureFlags, isFeatureEnabled } from './modules/config.js';
 import { MockRetrievalProvider } from './modules/retrieval.js';
 import { mockArticles } from './modules/kb.mock.js';
 import { StepRunner } from './modules/stepRunner.js';
@@ -23,6 +24,7 @@ const retrieval = new MockRetrievalProvider(mockArticles);
 const stepRunner = new StepRunner();
 const pageScanner = createPageScanner('default'); // Disabled by default
 let currentArticle = null;
+let scannedPageContent = null; // Store scanned page content
 
 // DOM Elements
 const articleSelectionView = document.getElementById('article-selection-view');
@@ -60,13 +62,97 @@ const failureReason = document.getElementById('failure-reason');
 const failureNote = document.getElementById('failure-note');
 
 // Initialize UI
-function init() {
+async function init() {
+  // Log feature flags
+  console.log('[Stepper] Feature flags:', FeatureFlags);
+  
+  // Initialize page scanner if enabled
+  if (isFeatureEnabled('ENABLE_PAGE_SCAN')) {
+    console.log('[Stepper] Page scanning enabled, initializing...');
+    pageScanner.enable();
+    await initializePageScanning();
+  } else {
+    console.log('[Stepper] Page scanning disabled');
+  }
+  
   renderArticleList();
   setupEventListeners();
   
   // Log module initialization
   console.log('[Stepper] Modules initialized');
   console.log('[PageScanner] Enabled:', pageScanner.isEnabled());
+}
+
+/**
+ * Initialize page scanning functionality
+ * Scans the active page and prefills search if content is found
+ */
+async function initializePageScanning() {
+  try {
+    scannedPageContent = await pageScanner.scanActivePage();
+    
+    if (scannedPageContent) {
+      console.log('[Stepper] Page content scanned:', {
+        title: scannedPageContent.title,
+        url: scannedPageContent.url,
+        textLength: scannedPageContent.text?.length || 0
+      });
+      
+      // Prefill search with relevant content
+      if (scannedPageContent.text && articleSearch) {
+        const searchQuery = extractSearchQuery(scannedPageContent);
+        if (searchQuery) {
+          articleSearch.value = searchQuery;
+          // Trigger search to filter articles
+          handleSearch();
+          
+          showNotification(
+            `Page scanned: "${scannedPageContent.title}". Search prefilled.`,
+            'info'
+          );
+        }
+      }
+    } else {
+      console.log('[Stepper] No page content available');
+    }
+  } catch (error) {
+    console.error('[Stepper] Error initializing page scanning:', error);
+  }
+}
+
+/**
+ * Extract a search query from scanned page content
+ * @param {PageContent} content - Scanned page content
+ * @returns {string} Search query
+ */
+function extractSearchQuery(content) {
+  // Use metadata if available
+  if (content.metadata?.product) {
+    return content.metadata.product;
+  }
+  
+  // Extract key terms from page text
+  const text = content.text || '';
+  
+  // Look for common product/issue keywords
+  const keywords = [
+    'gmail', 'outlook', 'email', 
+    'network', 'wifi', 'internet', 'connection',
+    'windows', 'mac', 'linux',
+    'installation', 'install', 'setup',
+    'error', 'failed', 'not working'
+  ];
+  
+  const lowerText = text.toLowerCase();
+  const foundKeywords = keywords.filter(keyword => lowerText.includes(keyword));
+  
+  // Return the first few keywords or first sentence
+  if (foundKeywords.length > 0) {
+    return foundKeywords.slice(0, 2).join(' ');
+  }
+  
+  // Fallback: first 50 characters
+  return text.substring(0, 50).trim();
 }
 
 // Render article list

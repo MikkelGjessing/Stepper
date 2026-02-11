@@ -91,6 +91,66 @@ export class DefaultPageScanner extends PageScanner {
       return null;
     }
 
+    // Return mocked content for now (deterministic behavior)
+    console.log('[PageScanner] Returning mocked page content');
+    return this._getMockedPageContent();
+  }
+
+  /**
+   * Get mocked page content for testing/development
+   * Returns deterministic test data
+   * @returns {PageContent} Mocked page content
+   * @private
+   */
+  _getMockedPageContent() {
+    const mockScenarios = [
+      {
+        url: 'https://example.com/support',
+        title: 'Customer Support - Email Issue',
+        text: 'Email not sending. Using Gmail. Error message: "Could not connect to SMTP server". Checked internet connection.',
+        metadata: {
+          product: 'Gmail',
+          issue: 'email-sending',
+          platform: 'Windows'
+        }
+      },
+      {
+        url: 'https://example.com/help',
+        title: 'Network Connection Problems',
+        text: 'Internet connection lost. WiFi shows connected but no internet access. Using Windows 10. Network adapter seems active.',
+        metadata: {
+          product: 'Windows',
+          issue: 'network',
+          platform: 'Windows 10'
+        }
+      },
+      {
+        url: 'https://example.com/issues',
+        title: 'Software Installation Failed',
+        text: 'Installation failed with error code 1603. Windows installer package. Need administrator permissions.',
+        metadata: {
+          product: 'Windows Installer',
+          issue: 'installation',
+          errorCode: '1603'
+        }
+      }
+    ];
+
+    // Return a random scenario for variety (but deterministic within session)
+    const scenario = mockScenarios[0]; // Use first scenario for now
+    
+    return {
+      ...scenario,
+      scannedAt: new Date()
+    };
+  }
+
+  /**
+   * Scan the active tab for real content (disabled for now)
+   * @returns {Promise<PageContent|null>} Page content or null if unavailable
+   * @private
+   */
+  async _scanActivePageReal() {
     try {
       // Query the active tab
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
