@@ -154,7 +154,7 @@ async function handleUserInput() {
   // Simulate typing delay
   await new Promise(resolve => setTimeout(resolve, 800));
   
-  // Search for matching articles
+  // Search for matching articles (returns array of {article, score, matchInfo} objects)
   const articles = await retrieval.search(query);
   
   removeTypingIndicator();
