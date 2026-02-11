@@ -13,6 +13,24 @@ let currentArticle = null;
 // Load mock articles
 kb.loadArticles(mockArticles);
 
+// Notification helper function
+function showNotification(message, options = {}) {
+  const { 
+    type = 'info',  // 'info', 'success', 'warning', 'error'
+    duration = 3000,
+    requireConfirm = false 
+  } = options;
+  
+  if (requireConfirm) {
+    return confirm(message);
+  }
+  
+  // For now, use alert for simplicity
+  // TODO: Replace with toast notification system for better UX
+  alert(message);
+  return true;
+}
+
 // DOM Elements
 const articleSelectionView = document.getElementById('article-selection-view');
 const stepRunnerView = document.getElementById('step-runner-view');
@@ -193,6 +211,7 @@ function handleFailureSubmit(e) {
   const state = stepper.getState();
   
   allSteps.forEach(s => {
+    // Check Set membership using includes since getState() converts to Array
     if (state.completedStepIds.includes(s.id)) {
       completedStepTexts.push(s.text);
     }
@@ -214,18 +233,17 @@ function handleFailureSubmit(e) {
       completedStepTexts
     );
     
-    if (result.skippedSteps > 0) {
-      alert(`Switching to alternative approach: ${fallbackResult.fallback.condition}\nSkipping ${result.skippedSteps} step(s) already completed.`);
-    } else {
-      alert(`Switching to alternative approach: ${fallbackResult.fallback.condition}`);
-    }
+    const message = result.skippedSteps > 0
+      ? `Switching to alternative approach: ${fallbackResult.fallback.condition}\nSkipping ${result.skippedSteps} step(s) already completed.`
+      : `Switching to alternative approach: ${fallbackResult.fallback.condition}`;
     
+    showNotification(message, { type: 'info' });
     renderCurrentStep();
   } else if (fallbackResult.type === 'cross-article') {
     // Found fallback in different article
     const message = `Found alternative solution in "${fallbackResult.article.title}".\n\nWould you like to switch to this approach?`;
     
-    if (confirm(message)) {
+    if (showNotification(message, { requireConfirm: true })) {
       // Switch to the new article
       currentArticle = fallbackResult.article;
       articleTitle.textContent = currentArticle.title;
@@ -237,20 +255,29 @@ function handleFailureSubmit(e) {
       );
       
       if (result.skippedSteps > 0) {
-        alert(`Switched to new article. Skipping ${result.skippedSteps} step(s) already completed.`);
+        showNotification(
+          `Switched to new article. Skipping ${result.skippedSteps} step(s) already completed.`,
+          { type: 'success' }
+        );
       }
       
       renderCurrentStep();
     } else {
-      alert('Issue recorded. You can continue with the next step or reset.');
+      showNotification('Issue recorded. You can continue with the next step or reset.', { type: 'info' });
     }
   } else if (fallbackResult.type === 'escalation') {
     // Show escalation guidance
     const escalation = fallbackResult.escalation;
     if (escalation) {
-      alert(`No automated solution available.\n\nEscalation Required:\nWhen: ${escalation.when}\nTarget: ${escalation.target}`);
+      showNotification(
+        `No automated solution available.\n\nEscalation Required:\nWhen: ${escalation.when}\nTarget: ${escalation.target}`,
+        { type: 'warning' }
+      );
     } else {
-      alert('Issue recorded. No automated fallback available. Please escalate to appropriate support team.');
+      showNotification(
+        'Issue recorded. No automated fallback available. Please escalate to appropriate support team.',
+        { type: 'warning' }
+      );
     }
   }
 }

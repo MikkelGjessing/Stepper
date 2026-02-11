@@ -3,6 +3,8 @@
 
 class StepperStateMachine {
   constructor() {
+    // Similarity threshold for step deduplication
+    this.STEP_SIMILARITY_THRESHOLD = 0.6;
     this.reset();
   }
 
@@ -50,7 +52,7 @@ class StepperStateMachine {
     const tokens2 = this.normalizeToTokens(text2);
     
     const similarity = this.calculateJaccardSimilarity(tokens1, tokens2);
-    return similarity > 0.6;
+    return similarity > this.STEP_SIMILARITY_THRESHOLD;
   }
 
   // Find steps to skip based on completed steps
@@ -304,15 +306,8 @@ class StepperStateMachine {
       }
     }
     
-    // Check if all steps from the beginning are skipped
-    let consecutiveSkipped = 0;
-    for (let i = 0; i < fallbackSteps.length; i++) {
-      if (stepsToSkip.has(i)) {
-        consecutiveSkipped++;
-      } else {
-        break;
-      }
-    }
+    // The startIndex itself represents consecutive skipped steps from beginning
+    const consecutiveSkipped = startIndex;
     
     this.state.currentStepIndex = startIndex;
     this.state.skippedStepsCount = consecutiveSkipped;
