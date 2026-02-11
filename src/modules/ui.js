@@ -52,7 +52,7 @@ export function renderArticleItem(article, onClick) {
     <h3>${escapeHtml(article.title)}</h3>
     <p>${escapeHtml(article.summary)}</p>
     <div class="article-tags">
-      ${article.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
+      ${(article.tags || []).map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}
     </div>
   `;
   articleItem.addEventListener('click', onClick);
@@ -126,7 +126,7 @@ export function populateFullArticle(article, container) {
   stepsSection.className = 'article-section';
   stepsSection.innerHTML = `<h3>Steps</h3>`;
   
-  article.steps.forEach((step, index) => {
+  (article.steps || []).forEach((step, index) => {
     const stepItem = document.createElement('div');
     stepItem.className = 'step-item';
     stepItem.innerHTML = `
