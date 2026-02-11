@@ -195,7 +195,8 @@ export class DefaultPageScanner extends PageScanner {
         const value = match[2].trim();
         
         // Only store if label is reasonable length (2-50 chars) and value exists
-        if (label.length >= 2 && label.length <= 50 && value && value.length > 0) {
+        // Don't overwrite if already exists (prefer first match)
+        if (label.length >= 2 && label.length <= 50 && value && value.length > 0 && !context.has(label)) {
           context.set(label, value);
         }
       }
