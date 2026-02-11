@@ -197,6 +197,19 @@ header p {
   color: var(--primary-color);
 }
 
+/* Skipped Steps Banner */
+.skipped-steps-banner {
+  padding: var(--spacing-md);
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: var(--radius);
+  text-align: center;
+  font-size: 14px;
+  font-weight: 500;
+  color: #856404;
+  margin-top: var(--spacing-sm);
+}
+
 /* Step Card */
 .step-card {
   background: var(--surface);

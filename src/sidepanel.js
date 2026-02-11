@@ -19,6 +19,7 @@ const stepRunnerView = document.getElementById('step-runner-view');
 const articleList = document.getElementById('article-list');
 const articleTitle = document.getElementById('article-title');
 const stepCounter = document.getElementById('step-counter');
+const skippedStepsBanner = document.getElementById('skipped-steps-banner');
 const stepCard = document.getElementById('step-card');
 const completionView = document.getElementById('completion-view');
 
@@ -110,6 +111,17 @@ function renderCurrentStep() {
   stepCard.style.display = 'block';
   completionView.style.display = 'none';
   
+  // Show skipped steps banner if applicable
+  const skippedCount = stepper.getSkippedStepsCount();
+  if (skippedCount > 0) {
+    skippedStepsBanner.style.display = 'block';
+    skippedStepsBanner.textContent = `Skipped ${skippedCount} step${skippedCount > 1 ? 's' : ''} already completed.`;
+    // Clear the count so banner doesn't show on subsequent steps
+    stepper.clearSkippedStepsCount();
+  } else {
+    skippedStepsBanner.style.display = 'none';
+  }
+  
   // Update step number
   stepNumber.textContent = `Step ${state.currentStepIndex + 1}`;
   
@@ -170,12 +182,77 @@ function handleFailureSubmit(e) {
   const reason = failureReason.value;
   const note = failureNote.value;
   
+  // Record the failure
   stepper.recordFailure(step.id, reason, note);
   
   failureModal.style.display = 'none';
   
-  // Show a brief confirmation (optional)
-  alert('Issue recorded. You can continue with the next step or try an alternative approach.');
+  // Get all completed step texts for deduplication
+  const completedStepTexts = [];
+  const allSteps = currentArticle.steps || [];
+  const state = stepper.getState();
+  
+  allSteps.forEach(s => {
+    if (state.completedStepIds.includes(s.id)) {
+      completedStepTexts.push(s.text);
+    }
+  });
+  
+  // Select appropriate fallback
+  const fallbackResult = stepper.selectFallback(
+    currentArticle,
+    kb.getAllArticles(),
+    reason,
+    note
+  );
+  
+  if (fallbackResult.type === 'same-article') {
+    // Switch to fallback in same article
+    const result = stepper.switchToFallback(
+      fallbackResult.fallback.id,
+      currentArticle,
+      completedStepTexts
+    );
+    
+    if (result.skippedSteps > 0) {
+      alert(`Switching to alternative approach: ${fallbackResult.fallback.condition}\nSkipping ${result.skippedSteps} step(s) already completed.`);
+    } else {
+      alert(`Switching to alternative approach: ${fallbackResult.fallback.condition}`);
+    }
+    
+    renderCurrentStep();
+  } else if (fallbackResult.type === 'cross-article') {
+    // Found fallback in different article
+    const message = `Found alternative solution in "${fallbackResult.article.title}".\n\nWould you like to switch to this approach?`;
+    
+    if (confirm(message)) {
+      // Switch to the new article
+      currentArticle = fallbackResult.article;
+      articleTitle.textContent = currentArticle.title;
+      
+      const result = stepper.switchToFallback(
+        fallbackResult.fallback.id,
+        currentArticle,
+        completedStepTexts
+      );
+      
+      if (result.skippedSteps > 0) {
+        alert(`Switched to new article. Skipping ${result.skippedSteps} step(s) already completed.`);
+      }
+      
+      renderCurrentStep();
+    } else {
+      alert('Issue recorded. You can continue with the next step or reset.');
+    }
+  } else if (fallbackResult.type === 'escalation') {
+    // Show escalation guidance
+    const escalation = fallbackResult.escalation;
+    if (escalation) {
+      alert(`No automated solution available.\n\nEscalation Required:\nWhen: ${escalation.when}\nTarget: ${escalation.target}`);
+    } else {
+      alert('Issue recorded. No automated fallback available. Please escalate to appropriate support team.');
+    }
+  }
 }
 
 // Show completion summary
@@ -228,11 +305,10 @@ function showCompletion() {
 // Format failure reason for display
 function formatReason(reason) {
   const reasons = {
-    'not-applicable': 'Not Applicable to Situation',
-    'did-not-resolve': 'Did Not Resolve Issue',
-    'customer-declined': 'Customer Declined',
-    'technical-limitation': 'Technical Limitation',
-    'insufficient-permissions': 'Insufficient Permissions',
+    'cant-find-option': "Customer can't find option/button",
+    'system-error': 'System error message',
+    'permission-issue': 'Permission/access issue',
+    'no-change': "Outcome didn't change",
     'other': 'Other'
   };
   return reasons[reason] || reason;

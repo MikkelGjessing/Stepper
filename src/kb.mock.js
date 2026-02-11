@@ -48,6 +48,8 @@ export const mockArticles = [
       {
         id: "fallback1",
         condition: "If step2 fails",
+        reason_category: "system-error",
+        trigger_keywords: ["smtp", "settings", "configuration", "error"],
         steps: [
           {
             id: "fb1-step1",
@@ -106,7 +108,44 @@ export const mockArticles = [
         expectedResult: "Email sends successfully"
       }
     ],
-    fallbacks: [],
+    fallbacks: [
+      {
+        id: "fallback1",
+        condition: "If mailbox quota issue",
+        reason_category: "system-error",
+        trigger_keywords: ["quota", "mailbox", "full", "space"],
+        steps: [
+          {
+            id: "fb1-step1",
+            text: "Archive old emails to free up space",
+            expectedResult: "Mailbox usage drops below 90%"
+          },
+          {
+            id: "fb1-step2",
+            text: "Empty deleted items folder",
+            expectedResult: "Deleted items folder is empty"
+          }
+        ]
+      },
+      {
+        id: "fallback2",
+        condition: "If offline mode persists",
+        reason_category: "no-change",
+        trigger_keywords: ["offline", "online", "connection", "mode"],
+        steps: [
+          {
+            id: "fb2-step1",
+            text: "Restart Outlook in safe mode",
+            expectedResult: "Outlook opens in safe mode"
+          },
+          {
+            id: "fb2-step2",
+            text: "Recreate Outlook profile",
+            expectedResult: "New profile is created and working"
+          }
+        ]
+      }
+    ],
     stop_conditions: [
       "Email successfully sends",
       "Mailbox quota issue confirmed"
@@ -167,6 +206,8 @@ export const mockArticles = [
       {
         id: "fallback1",
         condition: "If adapter restart fails",
+        reason_category: "no-change",
+        trigger_keywords: ["adapter", "driver", "network", "restart"],
         steps: [
           {
             id: "fb1-step1",
@@ -228,7 +269,44 @@ export const mockArticles = [
         expectedResult: "Connection established successfully"
       }
     ],
-    fallbacks: [],
+    fallbacks: [
+      {
+        id: "fallback1",
+        condition: "If WiFi preferences don't work",
+        reason_category: "no-change",
+        trigger_keywords: ["wifi", "preferences", "network", "settings"],
+        steps: [
+          {
+            id: "fb1-step1",
+            text: "Reset SMC (System Management Controller)",
+            expectedResult: "SMC reset completes successfully"
+          },
+          {
+            id: "fb1-step2",
+            text: "Reset NVRAM/PRAM",
+            expectedResult: "NVRAM reset completes successfully"
+          }
+        ]
+      },
+      {
+        id: "fallback2",
+        condition: "If permission issues",
+        reason_category: "permission-issue",
+        trigger_keywords: ["permission", "access", "admin", "password"],
+        steps: [
+          {
+            id: "fb2-step1",
+            text: "Verify admin account credentials",
+            expectedResult: "Admin password is correct"
+          },
+          {
+            id: "fb2-step2",
+            text: "Boot into recovery mode and reset permissions",
+            expectedResult: "Permissions reset successfully"
+          }
+        ]
+      }
+    ],
     stop_conditions: [
       "Network connection restored",
       "Hardware failure suspected"

@@ -32,6 +32,11 @@
         <!-- Will show "This solution has X steps" -->
       </div>
 
+      <!-- Skipped Steps Banner -->
+      <div id="skipped-steps-banner" class="skipped-steps-banner" style="display: none;">
+        <!-- Will show "Skipped N steps already completed" -->
+      </div>
+
       <!-- Step Card -->
       <div id="step-card" class="step-card">
         <div class="step-header">
@@ -113,11 +118,10 @@
               <label for="failure-reason">Reason:</label>
               <select id="failure-reason" required>
                 <option value="">Select a reason...</option>
-                <option value="not-applicable">Not Applicable to Situation</option>
-                <option value="did-not-resolve">Did Not Resolve Issue</option>
-                <option value="customer-declined">Customer Declined</option>
-                <option value="technical-limitation">Technical Limitation</option>
-                <option value="insufficient-permissions">Insufficient Permissions</option>
+                <option value="cant-find-option">Customer can't find option/button</option>
+                <option value="system-error">System error message</option>
+                <option value="permission-issue">Permission/access issue</option>
+                <option value="no-change">Outcome didn't change</option>
                 <option value="other">Other</option>
               </select>
             </div>
