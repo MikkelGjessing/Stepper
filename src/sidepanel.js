@@ -16,7 +16,8 @@ import {
   populateFullArticle,
   updateStepProgress,
   toggleElement,
-  clearElement
+  clearElement,
+  escapeHtml
 } from './modules/ui.js';
 
 // Constants
@@ -28,6 +29,7 @@ const stepRunner = new StepRunner();
 const pageScanner = createPageScanner('default'); // Disabled by default
 let currentArticle = null;
 let scannedPageContent = null; // Store scanned page content
+let extractedContext = new Map(); // Store extracted label-value pairs from page scan
 
 // DOM Elements
 const articleSelectionView = document.getElementById('article-selection-view');
@@ -98,8 +100,17 @@ async function initializePageScanning() {
       console.log('[Stepper] Page content scanned:', {
         title: scannedPageContent.title,
         url: scannedPageContent.url,
-        textLength: scannedPageContent.text?.length || 0
+        textLength: scannedPageContent.text?.length || 0,
+        contextFieldsFound: scannedPageContent.extractedContext?.size || 0
       });
+      
+      // Store extracted context
+      if (scannedPageContent.extractedContext) {
+        extractedContext = scannedPageContent.extractedContext;
+        console.log('[Stepper] Extracted context fields:', 
+          Array.from(extractedContext.entries()).map(([k, v]) => `${k}: ${v}`)
+        );
+      }
       
       // Prefill search with relevant content
       if (scannedPageContent.text && articleSearch) {
@@ -156,6 +167,39 @@ function extractSearchQuery(content) {
   
   // Fallback: first MAX_FALLBACK_QUERY_LENGTH characters
   return text.substring(0, MAX_FALLBACK_QUERY_LENGTH).trim();
+}
+
+/**
+ * Augment text with extracted context values
+ * Detects mentions of context labels and appends their values
+ * @param {string} text - Text to augment (step text or expected result)
+ * @returns {string} Augmented HTML with context hints
+ */
+function augmentTextWithContext(text) {
+  if (!text || extractedContext.size === 0) {
+    return escapeHtml(text);
+  }
+  
+  const contextHints = [];
+  
+  // Check if any context labels are mentioned in the text (case-insensitive)
+  extractedContext.forEach((value, label) => {
+    // Create case-insensitive regex for the label
+    const labelRegex = new RegExp(`\\b${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    
+    if (labelRegex.test(text)) {
+      contextHints.push(`${escapeHtml(label)}: ${escapeHtml(value)}`);
+    }
+  });
+  
+  // Build HTML with context hints styled differently
+  let html = escapeHtml(text);
+  
+  if (contextHints.length > 0) {
+    html += ` <span class="context-hint">(Stepper found: ${contextHints.join(', ')})</span>`;
+  }
+  
+  return html;
 }
 
 // Render article list
@@ -231,13 +275,13 @@ function renderCurrentStep() {
     skippedStepsBanner.style.display = 'none';
   }
   
-  // Update step text
-  stepText.textContent = step.text;
+  // Update step text (augment with context if available)
+  stepText.innerHTML = augmentTextWithContext(step.text);
   
   // Update expected result
   if (step.expectedResult) {
     expectedResultContainer.style.display = 'block';
-    expectedResult.textContent = step.expectedResult;
+    expectedResult.innerHTML = augmentTextWithContext(step.expectedResult);
   } else {
     expectedResultContainer.style.display = 'none';
   }

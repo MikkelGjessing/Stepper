@@ -8,6 +8,7 @@
  * @property {string} title - Page title
  * @property {string} text - Extracted text content
  * @property {Object} metadata - Additional metadata (product, case number, etc.)
+ * @property {Map<string, string>} extractedContext - Label-value pairs extracted from page (e.g., "Terminal ID" -> "12345")
  * @property {Date} scannedAt - Timestamp of scan
  */
 
@@ -107,7 +108,13 @@ export class DefaultPageScanner extends PageScanner {
       {
         url: 'https://example.com/support',
         title: 'Customer Support - Email Issue',
-        text: 'Email not sending. Using Gmail. Error message: "Could not connect to SMTP server". Checked internet connection.',
+        text: `Email not sending. Using Gmail. Error message: "Could not connect to SMTP server". Checked internet connection.
+        
+        Customer ID: ABC123
+        Terminal ID: T-456789
+        SMTP Server: smtp.gmail.com
+        Port Number: 587
+        Account Type: Business`,
         metadata: {
           product: 'Gmail',
           issue: 'email-sending',
@@ -117,7 +124,12 @@ export class DefaultPageScanner extends PageScanner {
       {
         url: 'https://example.com/help',
         title: 'Network Connection Problems',
-        text: 'Internet connection lost. WiFi shows connected but no internet access. Using Windows 10. Network adapter seems active.',
+        text: `Internet connection lost. WiFi shows connected but no internet access. Using Windows 10. Network adapter seems active.
+        
+        Router Model: NetGear R7000
+        IP Address: 192.168.1.100
+        MAC Address: AA:BB:CC:DD:EE:FF
+        Network Name: HomeWiFi`,
         metadata: {
           product: 'Windows',
           issue: 'network',
@@ -127,7 +139,12 @@ export class DefaultPageScanner extends PageScanner {
       {
         url: 'https://example.com/issues',
         title: 'Software Installation Failed',
-        text: 'Installation failed with error code 1603. Windows installer package. Need administrator permissions.',
+        text: `Installation failed with error code 1603. Windows installer package. Need administrator permissions.
+        
+        Error Code: 1603
+        Product Name: Adobe Acrobat
+        Version: 2023.1
+        Installation Path: C:\\Program Files\\Adobe`,
         metadata: {
           product: 'Windows Installer',
           issue: 'installation',
@@ -139,10 +156,52 @@ export class DefaultPageScanner extends PageScanner {
     // Return first scenario for deterministic behavior
     const scenario = mockScenarios[0];
     
+    // Extract label-value pairs from text
+    const extractedContext = this._extractLabelValuePairs(scenario.text);
+    
     return {
       ...scenario,
+      extractedContext,
       scannedAt: new Date()
     };
+  }
+
+  /**
+   * Extract label-value pairs from text
+   * Detects patterns like "Label: Value", "Label = Value", "Label - Value"
+   * @param {string} text - Text to extract from
+   * @returns {Map<string, string>} Map of label to value
+   * @private
+   */
+  _extractLabelValuePairs(text) {
+    const context = new Map();
+    
+    if (!text) return context;
+    
+    // Pattern matches:
+    // - "Label: Value" (colon separator)
+    // - "Label = Value" (equals separator)
+    // - "Label - Value" (dash separator, with extra spacing)
+    const patterns = [
+      /([A-Z][A-Za-z\s]+?):\s*([^\n]+)/g,  // Colon: "Customer ID: ABC123"
+      /([A-Z][A-Za-z\s]+?)\s*=\s*([^\n]+)/g,  // Equals: "Status = Active"
+      /([A-Z][A-Za-z\s]+?)\s+-\s+([^\n]+)/g   // Dash: "Account Type - Premium"
+    ];
+    
+    patterns.forEach(pattern => {
+      let match;
+      while ((match = pattern.exec(text)) !== null) {
+        const label = match[1].trim();
+        const value = match[2].trim();
+        
+        // Only store if label is reasonable length (2-50 chars) and value exists
+        if (label.length >= 2 && label.length <= 50 && value && value.length > 0) {
+          context.set(label, value);
+        }
+      }
+    });
+    
+    return context;
   }
 
   /**
@@ -173,11 +232,15 @@ export class DefaultPageScanner extends PageScanner {
 
       const content = results[0].result;
       
+      // Extract label-value pairs from text
+      const extractedContext = this._extractLabelValuePairs(content.text);
+      
       return {
         url: tab.url,
         title: tab.title || content.title,
         text: content.text,
         metadata: content.metadata || {},
+        extractedContext,
         scannedAt: new Date()
       };
     } catch (error) {

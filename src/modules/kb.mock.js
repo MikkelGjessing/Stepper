@@ -23,8 +23,8 @@ export const mockArticles = [
       },
       {
         id: "step2",
-        text: "Verify SMTP settings: smtp.gmail.com, port 587",
-        expectedResult: "SMTP settings match the required configuration"
+        text: "Verify SMTP Server and Port Number match requirements",
+        expectedResult: "SMTP Server should be smtp.gmail.com and Port Number should be 587"
       },
       {
         id: "step3",
@@ -34,12 +34,17 @@ export const mockArticles = [
       },
       {
         id: "step4",
-        text: "Test sending a simple email to yourself",
-        expectedResult: "Email should appear in inbox within 1 minute",
-        sayToCustomer: "Please try sending a test email to yourself now"
+        text: "Verify Customer ID and Account Type are active",
+        expectedResult: "Customer ID shows valid account with correct Account Type"
       },
       {
         id: "step5",
+        text: "Test sending a simple email using Terminal ID for tracking",
+        expectedResult: "Email should appear in inbox within 1 minute with Terminal ID in headers",
+        sayToCustomer: "Please try sending a test email to yourself now"
+      },
+      {
+        id: "step6",
         text: "Check Google Account security settings for blocked sign-ins",
         expectedResult: "No recent blocked sign-in attempts shown"
       }
@@ -53,13 +58,13 @@ export const mockArticles = [
         steps: [
           {
             id: "fb1-step1",
-            text: "Reset SMTP configuration to default",
-            expectedResult: "Settings restored to smtp.gmail.com:587"
+            text: "Reset SMTP Server configuration to default (smtp.gmail.com) and verify Port Number is 587",
+            expectedResult: "Settings restored to correct SMTP Server and Port Number"
           },
           {
             id: "fb1-step2",
-            text: "Restart email client",
-            expectedResult: "Client restarts successfully"
+            text: "Restart email client and verify Terminal ID is logged",
+            expectedResult: "Client restarts successfully with Terminal ID in logs"
           }
         ]
       }

@@ -328,6 +328,16 @@ header p {
   margin-bottom: var(--spacing-lg);
 }
 
+/* Context hints from page scanning */
+.context-hint {
+  display: inline;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--primary-color);
+  font-style: italic;
+  opacity: 0.9;
+}
+
 .expected-outcome {
   margin-top: var(--spacing-lg);
   padding: var(--spacing-md);
