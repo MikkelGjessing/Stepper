@@ -212,14 +212,12 @@ function createArticleCard(article) {
   
   const tags = document.createElement('div');
   tags.className = 'article-tags';
-  if (article.tags && Array.isArray(article.tags)) {
-    article.tags.slice(0, 3).forEach(tag => {
-      const tagSpan = document.createElement('span');
-      tagSpan.className = 'tag';
-      tagSpan.textContent = tag;
-      tags.appendChild(tagSpan);
-    });
-  }
+  (article.tags || []).slice(0, 3).forEach(tag => {
+    const tagSpan = document.createElement('span');
+    tagSpan.className = 'tag';
+    tagSpan.textContent = tag;
+    tags.appendChild(tagSpan);
+  });
   card.appendChild(tags);
   
   card.addEventListener('click', () => selectArticleInChat(article.id));
