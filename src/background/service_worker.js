@@ -329,3 +329,24 @@ function generateUUID() {
 
 // Log service worker lifecycle
 console.log('Stepper 3.0 service worker loaded');
+
+/**
+ * Open side panel when extension icon is clicked
+ * This is required for side panel to open - action.default_popup is NOT used
+ */
+chrome.action.onClicked.addListener(async (tab) => {
+  try {
+    console.log('Extension icon clicked, opening side panel for tab:', tab.id);
+    await chrome.sidePanel.open({ tabId: tab.id });
+    console.log('Side panel opened successfully');
+  } catch (error) {
+    console.error('Error opening side panel:', error);
+    // Fallback: try without tabId
+    try {
+      await chrome.sidePanel.open({ windowId: tab.windowId });
+      console.log('Side panel opened successfully using windowId');
+    } catch (fallbackError) {
+      console.error('Fallback error opening side panel:', fallbackError);
+    }
+  }
+});
