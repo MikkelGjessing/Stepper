@@ -102,7 +102,8 @@ function setView(state) {
       
     case UI_STATE.ARTICLE:
       articleView.style.display = 'flex';
-      // IMPORTANT: Clear search results DOM completely
+      // IMPORTANT: Clear search results DOM completely to prevent search results
+      // from being visible during step execution (requirement: hide search results during step execution)
       resultsList.innerHTML = '';
       break;
       

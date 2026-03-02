@@ -16,7 +16,7 @@ body {
 .container {
   display: flex;
   flex-direction: column;
-  width: clamp(320px, 16.7vw, 420px);
+  width: clamp(320px, 16.7vw, 420px); /* ~1/6 of 1920px screen width = 320px for side panel */
   height: 100vh;
   background: white;
 }
@@ -270,35 +270,7 @@ body {
   background: #e0e0e0;
 }
 
-/* Viewer Panel (legacy - now in article view) */
-.viewer-panel {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  background: white;
-}
-
-.viewer-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e0e0e0;
-  background: white;
-}
-
-.viewer-header h2 {
-  font-size: 18px;
-  font-weight: 600;
-  flex: 1;
-}
-
-.viewer-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
-}
-
+/* Article Meta and Content */
 .article-meta {
   display: flex;
   gap: 16px;
