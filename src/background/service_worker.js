@@ -327,6 +327,9 @@ function generateUUID() {
   });
 }
 
+// Log service worker lifecycle
+console.log('Stepper 3.0 service worker loaded');
+
 /**
  * Open side panel when extension icon is clicked
  * This is required for side panel to open - action.default_popup is NOT used
@@ -347,6 +350,3 @@ chrome.action.onClicked.addListener(async (tab) => {
     }
   }
 });
-
-// Log service worker lifecycle
-console.log('Stepper 3.0 service worker loaded');
