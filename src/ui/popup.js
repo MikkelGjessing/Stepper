@@ -3,6 +3,15 @@
  * Manages the popup interface and user interactions
  */
 
+// UI State Machine
+const UI_STATE = {
+  SEARCH: 'search',
+  ARTICLE: 'article',
+  PREVIEW: 'preview'
+};
+
+let currentUIState = UI_STATE.SEARCH;
+
 // State management
 let currentArticles = [];
 let currentSelectedArticle = null;
@@ -15,14 +24,14 @@ let articleCompletionStates = {}; // { articleId: { completedStepIndexes: [], co
 const searchInput = document.getElementById('searchInput');
 const searchBtn = document.getElementById('searchBtn');
 const settingsBtn = document.getElementById('settingsBtn');
-const resultsPanel = document.getElementById('resultsPanel');
 const resultsList = document.getElementById('resultsList');
 const resultCount = document.getElementById('resultCount');
-const viewerPanel = document.getElementById('viewerPanel');
-const viewerContent = document.getElementById('viewerContent');
-const articleTitle = document.getElementById('articleTitle');
-const backBtn = document.getElementById('backBtn');
 const refreshBtn = document.getElementById('refreshBtn');
+
+// View containers
+const searchView = document.getElementById('searchView');
+const articleView = document.getElementById('articleView');
+const previewView = document.getElementById('previewView');
 
 // Initialize on load
 document.addEventListener('DOMContentLoaded', async () => {
@@ -60,14 +69,48 @@ function setupEventListeners() {
     chrome.runtime.openOptionsPage();
   });
   
-  backBtn.addEventListener('click', () => {
-    clearArticleView();
-  });
-  
   refreshBtn.addEventListener('click', async () => {
     await loadArticles();
     showNotification('Articles refreshed');
   });
+}
+
+/**
+ * View State Machine - Controls which view is visible
+ */
+function setView(state) {
+  console.log('Setting view to:', state);
+  currentUIState = state;
+  
+  // Hide all views
+  searchView.style.display = 'none';
+  articleView.style.display = 'none';
+  previewView.style.display = 'none';
+  
+  // Show the requested view
+  switch (state) {
+    case UI_STATE.SEARCH:
+      searchView.style.display = 'flex';
+      // Clear article state
+      currentSelectedArticle = null;
+      currentStepIndex = 0;
+      // Re-render search results if needed
+      if (currentArticles.length > 0) {
+        displayResults(currentArticles);
+      }
+      break;
+      
+    case UI_STATE.ARTICLE:
+      articleView.style.display = 'flex';
+      // IMPORTANT: Clear search results DOM completely to prevent search results
+      // from being visible during step execution (requirement: hide search results during step execution)
+      resultsList.innerHTML = '';
+      break;
+      
+    case UI_STATE.PREVIEW:
+      previewView.style.display = 'flex';
+      break;
+  }
 }
 
 /**
@@ -267,17 +310,6 @@ async function displayArticle(articleId) {
   currentSelectedArticle = article;
   currentStepIndex = 0;
   
-  // Update active state in results
-  document.querySelectorAll('.result-item').forEach(item => {
-    item.classList.remove('active');
-    if (item.getAttribute('data-article-id') === articleId) {
-      item.classList.add('active');
-    }
-  });
-  
-  // Display article content
-  articleTitle.textContent = article.title;
-  
   // Check if article has steps
   const steps = article.steps && Array.isArray(article.steps) && article.steps.length > 0 
     ? article.steps 
@@ -285,7 +317,9 @@ async function displayArticle(articleId) {
   
   // Handle edge case: article with 0 steps
   if (steps.length === 0) {
-    viewerContent.innerHTML = `
+    setView(UI_STATE.ARTICLE);
+    const articleContentScrollable = document.getElementById('articleContentScrollable');
+    articleContentScrollable.innerHTML = `
       <div class="error-message">
         <h3>⚠️ No Steps Available</h3>
         <p>This article does not contain any step-by-step instructions.</p>
@@ -295,13 +329,14 @@ async function displayArticle(articleId) {
     
     const backToSearchBtn = document.getElementById('backToSearchBtn');
     if (backToSearchBtn) {
-      backToSearchBtn.addEventListener('click', clearArticleView);
+      backToSearchBtn.addEventListener('click', () => setView(UI_STATE.SEARCH));
     }
     
     return;
   }
   
-  // Render step-by-step view
+  // Switch to article view and render
+  setView(UI_STATE.ARTICLE);
   renderStepView();
 }
 
@@ -326,7 +361,8 @@ function renderStepView() {
   const isFirstStep = currentStepIndex === 0;
   const isLastStep = currentStepIndex === totalSteps - 1;
   
-  viewerContent.innerHTML = `
+  const articleContentScrollable = document.getElementById('articleContentScrollable');
+  articleContentScrollable.innerHTML = `
     <!-- Progress Bar -->
     <div class="progress-container">
       <div class="progress-info">
@@ -426,7 +462,7 @@ function renderStepView() {
   
   if (searchNewArticleBtn) {
     searchNewArticleBtn.addEventListener('click', () => {
-      clearArticleView();
+      setView(UI_STATE.SEARCH);
       searchInput.focus();
     });
   }
@@ -470,7 +506,8 @@ function renderCompletionSummary() {
   const steps = article.steps;
   const completionState = getCompletionState(article.id);
   
-  viewerContent.innerHTML = `
+  const articleContentScrollable = document.getElementById('articleContentScrollable');
+  articleContentScrollable.innerHTML = `
     <div class="completion-summary">
       <div class="completion-icon">✅</div>
       <h2>Congratulations!</h2>
@@ -528,7 +565,7 @@ function renderCompletionSummary() {
   
   if (searchNewArticleBtn2) {
     searchNewArticleBtn2.addEventListener('click', () => {
-      clearArticleView();
+      setView(UI_STATE.SEARCH);
       searchInput.focus();
     });
   }
@@ -538,7 +575,7 @@ function renderCompletionSummary() {
   }
 }
 
-// Show preview all steps modal
+// Show preview all steps
 function showPreviewAllSteps() {
   if (!currentSelectedArticle) return;
   
@@ -546,64 +583,50 @@ function showPreviewAllSteps() {
   const steps = article.steps;
   const completionState = getCompletionState(article.id);
   
-  // Create modal
-  const modal = document.createElement('div');
-  modal.className = 'modal-overlay';
-  modal.innerHTML = `
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>All Steps Preview</h3>
-        <button class="modal-close" id="closeModalBtn">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="steps-preview-list">
-          ${steps.map((step, index) => {
-            const isCompleted = completionState.completedStepIndexes.includes(index);
-            const isCurrent = index === currentStepIndex;
-            return `
-              <div class="preview-step-item ${isCurrent ? 'current' : ''}" data-step-index="${index}">
-                <div class="preview-step-number">
-                  ${isCompleted ? '✓' : index + 1}
-                </div>
-                <div class="preview-step-content">
-                  <div class="preview-step-title">${escapeHtml(step.title)}</div>
-                  ${isCurrent ? '<span class="current-badge">Current</span>' : ''}
-                  ${isCompleted && !isCurrent ? '<span class="completed-badge-small">Completed</span>' : ''}
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
+  // Switch to preview view
+  setView(UI_STATE.PREVIEW);
+  
+  // Render preview content
+  const previewContent = document.getElementById('previewContent');
+  previewContent.innerHTML = `
+    <div class="steps-preview-list">
+      ${steps.map((step, index) => {
+        const isCompleted = completionState.completedStepIndexes.includes(index);
+        const isCurrent = index === currentStepIndex;
+        return `
+          <div class="preview-step-item ${isCurrent ? 'current' : ''}" data-step-index="${index}">
+            <div class="preview-step-number">
+              ${isCompleted ? '✓' : index + 1}
+            </div>
+            <div class="preview-step-content">
+              <div class="preview-step-title">${escapeHtml(step.title)}</div>
+              ${isCurrent ? '<span class="current-badge">Current</span>' : ''}
+              ${isCompleted && !isCurrent ? '<span class="completed-badge-small">Completed</span>' : ''}
+            </div>
+          </div>
+        `;
+      }).join('')}
     </div>
   `;
-  
-  document.body.appendChild(modal);
-  
-  // Add event listeners
-  const closeModalBtn = document.getElementById('closeModalBtn');
-  if (closeModalBtn) {
-    closeModalBtn.addEventListener('click', () => {
-      modal.remove();
-    });
-  }
-  
-  // Close on overlay click
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) {
-      modal.remove();
-    }
-  });
   
   // Add click handlers to step items
   document.querySelectorAll('.preview-step-item').forEach(item => {
     item.addEventListener('click', () => {
       const stepIndex = parseInt(item.getAttribute('data-step-index'), 10);
       currentStepIndex = stepIndex;
-      modal.remove();
+      setView(UI_STATE.ARTICLE);
       renderStepView();
     });
   });
+  
+  // Add back button handler
+  const previewBackBtn = document.getElementById('previewBackBtn');
+  if (previewBackBtn) {
+    previewBackBtn.addEventListener('click', () => {
+      setView(UI_STATE.ARTICLE);
+      renderStepView();
+    });
+  }
 }
 
 // Handle reset progress
@@ -616,21 +639,6 @@ async function handleResetProgress() {
     currentStepIndex = 0;
     renderStepView();
   }
-}
-
-// Clear article view
-function clearArticleView() {
-  currentSelectedArticle = null;
-  articleTitle.textContent = 'Select an article';
-  viewerContent.innerHTML = `
-    <div class="empty-state">
-      <p>Select an article from the results to view its content</p>
-    </div>
-  `;
-  
-  document.querySelectorAll('.result-item').forEach(item => {
-    item.classList.remove('active');
-  });
 }
 
 // Show notification
