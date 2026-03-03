@@ -2480,9 +2480,9 @@ const Articles = {
       console.log(`Index: ${step.index}`);
       console.log(`Images: ${step.images.length}`);
       console.log(`Body HTML length: ${step.bodyHtml.length} characters`);
-      // Strip HTML tags for console preview (not for sanitization - just for display)
-      const preview = step.bodyHtml.substring(0, 100).replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<[^>]+>/g, '').trim();
-      console.log(`Body preview: ${preview}...`);
+      // For security reasons, we don't show HTML content previews in console
+      // Use browser DevTools to inspect bodyHtml if needed
+      console.log(`Body preview: [HTML content - ${step.bodyHtml.length} chars]`);
       console.groupEnd();
     });
     
