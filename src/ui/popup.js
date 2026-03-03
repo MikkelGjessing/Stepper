@@ -377,8 +377,6 @@ function renderStepView() {
   const steps = article.steps;
   const totalSteps = steps.length;
   const currentStep = steps[currentStepIndex];
-  const completionState = getCompletionState(article.id);
-  const isCurrentStepCompleted = completionState.completedStepIndexes.includes(currentStepIndex);
   
   const articleContentScrollable = document.getElementById('articleContentScrollable');
   
@@ -453,12 +451,12 @@ function renderStepView() {
   
   // Add event listeners (using onclick to avoid duplicate listeners)
   const stepBackBtn = document.getElementById('stepBackBtn');
-  if (stepBackBtn && currentStepIndex > 0) {
+  if (stepBackBtn) {
     stepBackBtn.onclick = handleStepBack;
   }
   
   const stepContinueBtn = document.getElementById('stepContinueBtn');
-  if (stepContinueBtn && currentStepIndex < totalSteps - 1) {
+  if (stepContinueBtn) {
     stepContinueBtn.onclick = handleStepContinue;
   }
   
