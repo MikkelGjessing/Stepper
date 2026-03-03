@@ -159,8 +159,12 @@ async function handleSaveSettings(event) {
       llmModel: formFields.llmModel.value.trim() || 'gpt-3.5-turbo'
     };
     
-    // Validate settings
-    if (!validateSettings(settings)) {
+    // Optional format validation (only if values are provided)
+    const validationError = validateFormats(settings);
+    if (validationError) {
+      showStatus(validationError, 'error');
+      saveBtn.disabled = false;
+      saveBtn.textContent = '💾 Save Settings';
       return;
     }
     
@@ -236,46 +240,68 @@ async function handleResetToDefaults() {
   }
 }
 
-// Validate settings
-function validateSettings(settings) {
-  // Check required fields based on source type
-  if (settings.repoSourceType === 'url') {
-    if (!settings.repoUrl) {
-      showStatus('Please enter a repository URL', 'error');
-      return false;
-    }
-    
-    // Basic URL validation
-    try {
-      new URL(settings.repoUrl);
-    } catch {
-      showStatus('Please enter a valid URL', 'error');
-      return false;
-    }
-  } else if (settings.repoSourceType === 'azure') {
-    if (!settings.azureApiBaseUrl) {
-      showStatus('Please enter Azure API base URL', 'error');
-      return false;
-    }
-    if (!settings.azurePat) {
-      showStatus('Please enter Azure PAT', 'error');
-      return false;
+// Helper function to validate URL format
+// Returns true if URL is empty (optional) or has valid format
+// Returns false if URL is provided but has invalid format
+function isValidUrl(url) {
+  if (!url) return true; // Empty URLs are valid (field is optional)
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Validate formats (only if values are provided) - does NOT block saving
+function validateFormats(settings) {
+  // Only validate URL format if repoUrl is provided
+  if (settings.repoUrl && !isValidUrl(settings.repoUrl)) {
+    return 'Invalid Repository URL format';
+  }
+  
+  // Only validate Azure API URL format if provided
+  if (settings.azureApiBaseUrl && !isValidUrl(settings.azureApiBaseUrl)) {
+    return 'Invalid Azure API URL format';
+  }
+  
+  // Only validate LLM endpoint format if provided
+  if (settings.llmEndpoint && !isValidUrl(settings.llmEndpoint)) {
+    return 'Invalid LLM endpoint URL format';
+  }
+  
+  return null; // No validation errors
+}
+
+// Validate settings for specific actions (used by Sync, etc.)
+function validateSettingsForAction(settings, action) {
+  if (action === 'sync') {
+    // Check required fields based on source type
+    if (settings.repoSourceType === 'url') {
+      if (!settings.repoUrl) {
+        return 'Please configure and save Repository URL before syncing';
+      }
+      
+      // Re-validate format in case settings were imported or modified outside normal flow
+      if (!isValidUrl(settings.repoUrl)) {
+        return 'Invalid Repository URL format. Please correct it before syncing';
+      }
+    } else if (settings.repoSourceType === 'azure') {
+      if (!settings.azureApiBaseUrl) {
+        return 'Please configure and save Azure API base URL before syncing';
+      }
+      if (!settings.azurePat) {
+        return 'Please configure and save Azure PAT before syncing';
+      }
+      
+      // Re-validate format in case settings were imported or modified outside normal flow
+      if (!isValidUrl(settings.azureApiBaseUrl)) {
+        return 'Invalid Azure API URL format. Please correct it before syncing';
+      }
     }
   }
   
-  // Validate LLM settings if enabled
-  if (settings.enableLLMSearch) {
-    if (!settings.llmEndpoint) {
-      showStatus('Please enter LLM endpoint', 'error');
-      return false;
-    }
-    if (!settings.llmApiKey) {
-      showStatus('Please enter LLM API key', 'error');
-      return false;
-    }
-  }
-  
-  return true;
+  return null; // No validation errors
 }
 
 // Handle add demo articles
@@ -537,14 +563,10 @@ async function handleSyncRepo() {
     // Get current settings
     const settings = await Storage.getSettings();
     
-    // Validate configuration
-    if (settings.repoSourceType === 'url' && !settings.repoUrl) {
-      showSyncStatus('Please configure and save Repository URL before syncing', 'error');
-      return;
-    }
-    
-    if (settings.repoSourceType === 'azure' && (!settings.azureApiBaseUrl || !settings.azurePat)) {
-      showSyncStatus('Please configure and save Azure API settings before syncing', 'error');
+    // Validate configuration for sync action
+    const validationError = validateSettingsForAction(settings, 'sync');
+    if (validationError) {
+      showSyncStatus(validationError, 'error');
       return;
     }
     
