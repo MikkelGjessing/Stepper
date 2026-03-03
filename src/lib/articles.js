@@ -1186,12 +1186,45 @@ const Articles = {
       let inStepSection = false;
       let warnings = [];
       
+      // Check for "Step N:" pattern in plain text
+      const isStepMarker = (line) => {
+        return /^Step\s+(\d+)\s*:\s*(.+)$/i.test(line.trim());
+      };
+      
+      const parseStepMarker = (line) => {
+        const match = line.trim().match(/^Step\s+(\d+)\s*:\s*(.+)$/i);
+        if (match) {
+          return { number: parseInt(match[1]), title: match[2].trim() };
+        }
+        return null;
+      };
+      
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
         
         // Parse title (first # heading)
         if (!title && line.startsWith('# ')) {
           title = line.substring(2).trim();
+          continue;
+        }
+        
+        // Check for "Step N:" marker in plain text (ServiceNow-style)
+        if (isStepMarker(line)) {
+          // Save previous step if exists
+          if (currentStep && currentStepContent.length > 0) {
+            currentStep.bodyHtml = this.markdownToHtml(currentStepContent.join('\n'));
+            steps.push(currentStep);
+          }
+          
+          // Start new step
+          const stepInfo = parseStepMarker(line);
+          currentStep = {
+            title: `Step ${stepInfo.number}: ${stepInfo.title}`,
+            bodyHtml: '',
+            images: []
+          };
+          currentStepContent = [];
+          inStepSection = true;
           continue;
         }
         
@@ -1206,7 +1239,6 @@ const Articles = {
           // Start new step
           const stepTitle = line.substring(2).replace(/^Step:\s*/i, '').trim();
           currentStep = {
-            index: steps.length + 1,
             title: stepTitle,
             bodyHtml: '',
             images: []
@@ -1227,7 +1259,6 @@ const Articles = {
           // Start new step
           const stepTitle = line.substring(3).trim();
           currentStep = {
-            index: steps.length + 1,
             title: stepTitle,
             bodyHtml: '',
             images: []
@@ -1264,12 +1295,17 @@ const Articles = {
         // Use all content as a single step
         const bodyHtml = this.markdownToHtml(content);
         steps.push({
-          index: 1,
           title: 'Procedure',
           bodyHtml: bodyHtml,
           images: []
         });
       }
+      
+      // Add index to all steps
+      const indexedSteps = steps.map((step, index) => ({
+        index: index + 1,
+        ...step
+      }));
       
       return {
         ok: true,
@@ -1279,7 +1315,7 @@ const Articles = {
           summary: summary,
           tags: [],
           estimatedMinutes: null,
-          steps: steps,
+          steps: indexedSteps,
           source: 'uploaded',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
@@ -1370,6 +1406,11 @@ const Articles = {
       const h1 = doc.querySelector('h1');
       const title = h1 ? h1.textContent.trim() : (fallbackTitle || 'Untitled Article');
       
+      // Remove h1 from document to avoid including it in step content
+      if (h1) {
+        h1.remove();
+      }
+      
       // Get summary from first paragraph before first h2
       let summary = '';
       const firstP = doc.querySelector('p');
@@ -1380,54 +1421,51 @@ const Articles = {
         }
       }
       
-      // Parse steps from <h2> sections
-      const h2Elements = doc.querySelectorAll('h2');
-      const steps = [];
+      // Try new ServiceNow-style segmentation first
+      let steps = this.segmentIntoSteps(doc);
       
-      if (h2Elements.length > 0) {
-        h2Elements.forEach((h2, index) => {
-          const stepTitle = h2.textContent.trim();
-          const stepContent = this.getContentUntilNextHeading(h2);
-          
-          // Extract and sanitize images from step content
-          const images = [];
-          const imgElements = stepContent.querySelectorAll('img');
-          imgElements.forEach(img => {
-            const src = img.getAttribute('src') || '';
-            const alt = img.getAttribute('alt') || '';
-            const sanitizedSrc = this.sanitizeImageUrl(src);
-            if (sanitizedSrc) {
-              images.push({
-                alt: alt,
-                dataUrlOrRemoteUrl: sanitizedSrc
-              });
-              // Update the img tag with sanitized URL
-              img.setAttribute('src', sanitizedSrc);
-            } else {
-              // Remove invalid image
-              img.remove();
-            }
-          });
-          
-          // Sanitize the HTML content by removing scripts and dangerous attributes
-          const sanitizedContent = this.sanitizeHtmlContent(stepContent);
-          
-          steps.push({
-            index: index + 1,
-            title: stepTitle,
-            bodyHtml: sanitizedContent.innerHTML,
-            images: images
-          });
-        });
-      } else {
-        // No h2 elements found, create single-step fallback using body content
-        const bodyContent = doc.body.cloneNode(true);
+      // Fallback 1: If no "Step N:" markers, try <h2> sections
+      if (steps.length === 0) {
+        const h2Elements = doc.querySelectorAll('h2');
         
-        // Remove h1 from body content to avoid duplication
-        const h1InBody = bodyContent.querySelector('h1');
-        if (h1InBody) {
-          h1InBody.remove();
+        if (h2Elements.length > 0) {
+          h2Elements.forEach((h2, index) => {
+            const stepTitle = h2.textContent.trim();
+            const stepContent = this.getContentUntilNextHeading(h2);
+            
+            // Extract and sanitize images from step content
+            const images = [];
+            const imgElements = stepContent.querySelectorAll('img');
+            imgElements.forEach(img => {
+              const src = img.getAttribute('src') || '';
+              const alt = img.getAttribute('alt') || '';
+              const sanitizedSrc = this.sanitizeImageUrl(src);
+              if (sanitizedSrc) {
+                images.push({
+                  alt: alt,
+                  dataUrlOrRemoteUrl: sanitizedSrc
+                });
+                img.setAttribute('src', sanitizedSrc);
+              } else {
+                img.remove();
+              }
+            });
+            
+            // Sanitize the HTML content
+            const sanitizedContent = this.sanitizeHtmlContent(stepContent);
+            
+            steps.push({
+              title: stepTitle,
+              bodyHtml: sanitizedContent.innerHTML,
+              images: images
+            });
+          });
         }
+      }
+      
+      // Fallback 2: No steps found, create single-step using body content
+      if (steps.length === 0) {
+        const bodyContent = doc.body.cloneNode(true);
         
         // Extract images
         const images = [];
@@ -1451,12 +1489,17 @@ const Articles = {
         const sanitizedContent = this.sanitizeHtmlContent(bodyContent);
         
         steps.push({
-          index: 1,
           title: 'Procedure',
           bodyHtml: sanitizedContent.innerHTML,
           images: images
         });
       }
+      
+      // Add index to all steps
+      steps = steps.map((step, index) => ({
+        index: index + 1,
+        ...step
+      }));
       
       return {
         ok: true,
@@ -1577,48 +1620,51 @@ const Articles = {
         }
       }
 
-      // Parse steps from <h2> sections
-      const h2Elements = doc.querySelectorAll('h2');
-      const steps = [];
-
-      if (h2Elements.length > 0) {
-        // Multiple steps based on h2 headings
-        h2Elements.forEach((h2, index) => {
-          const stepTitle = h2.textContent.trim();
-          const stepContent = this.getContentUntilNextHeading(h2);
-
-          // Extract images from step content
-          const images = [];
-          const imgElements = stepContent.querySelectorAll('img');
-          imgElements.forEach(img => {
-            const src = img.getAttribute('src') || '';
-            const alt = img.getAttribute('alt') || '';
-            const sanitizedSrc = this.sanitizeImageUrl(src);
-            if (sanitizedSrc) {
-              images.push({
-                alt: alt,
-                dataUrlOrRemoteUrl: sanitizedSrc
-              });
-              img.setAttribute('src', sanitizedSrc);
-            } else {
-              img.remove();
-            }
-          });
-
-          // Sanitize the HTML content
-          const sanitizedContent = this.sanitizeHtmlContent(stepContent);
-
-          steps.push({
-            index: index + 1,
-            title: stepTitle,
-            bodyHtml: sanitizedContent.innerHTML,
-            images: images
-          });
-        });
-      } else {
-        // Single step article - treat all content as one step
-        const stepContent = document.createElement('div');
+      // Try new ServiceNow-style segmentation first
+      let steps = this.segmentIntoSteps(doc);
+      
+      // Fallback 1: If no "Step N:" markers, try <h2> sections
+      if (steps.length === 0) {
+        const h2Elements = doc.querySelectorAll('h2');
         
+        if (h2Elements.length > 0) {
+          // Multiple steps based on h2 headings
+          h2Elements.forEach((h2, index) => {
+            const stepTitle = h2.textContent.trim();
+            const stepContent = this.getContentUntilNextHeading(h2);
+
+            // Extract images from step content
+            const images = [];
+            const imgElements = stepContent.querySelectorAll('img');
+            imgElements.forEach(img => {
+              const src = img.getAttribute('src') || '';
+              const alt = img.getAttribute('alt') || '';
+              const sanitizedSrc = this.sanitizeImageUrl(src);
+              if (sanitizedSrc) {
+                images.push({
+                  alt: alt,
+                  dataUrlOrRemoteUrl: sanitizedSrc
+                });
+                img.setAttribute('src', sanitizedSrc);
+              } else {
+                img.remove();
+              }
+            });
+
+            // Sanitize the HTML content
+            const sanitizedContent = this.sanitizeHtmlContent(stepContent);
+
+            steps.push({
+              title: stepTitle,
+              bodyHtml: sanitizedContent.innerHTML,
+              images: images
+            });
+          });
+        }
+      }
+      
+      // Fallback 2: No steps found, create single-step using body content
+      if (steps.length === 0) {
         // Get all remaining content
         const bodyContent = doc.body.cloneNode(true);
         
@@ -1644,12 +1690,17 @@ const Articles = {
         const sanitizedContent = this.sanitizeHtmlContent(bodyContent);
 
         steps.push({
-          index: 1,
           title: 'Procedure',
           bodyHtml: sanitizedContent.innerHTML,
           images: images
         });
       }
+      
+      // Add index to all steps
+      steps = steps.map((step, index) => ({
+        index: index + 1,
+        ...step
+      }));
 
       return {
         ok: true,
@@ -1870,6 +1921,258 @@ const Articles = {
    */
   isBefore(el1, el2) {
     return !!(el2.compareDocumentPosition(el1) & Node.DOCUMENT_POSITION_PRECEDING);
+  },
+
+  /**
+   * Segment HTML content into steps based on "Step N:" markers and substeps
+   * Implements ServiceNow-style KB step segmentation
+   * @param {Document} doc - Parsed HTML document
+   * @returns {Array<Object>} Array of step objects with title, bodyHtml, images
+   */
+  segmentIntoSteps(doc) {
+    const steps = [];
+    const body = doc.body;
+    if (!body) return steps;
+    
+    // Helper: Check if text matches "Step N:" pattern
+    const isStepMarker = (text) => {
+      return /^Step\s+(\d+)\s*:\s*(.+)$/i.test(text);
+    };
+    
+    // Helper: Extract step number and title from "Step N: Title" text
+    const parseStepMarker = (text) => {
+      const match = text.match(/^Step\s+(\d+)\s*:\s*(.+)$/i);
+      if (match) {
+        return { number: parseInt(match[1]), title: match[2].trim() };
+      }
+      return null;
+    };
+    
+    // Helper: Check if text is a chapter/section heading (not a step)
+    const isChapterHeading = (text) => {
+      // Patterns like "Chapter 1:", "1. General info", "2. Procedure"
+      return /^(Chapter\s+\d+|[A-Z][\w\s]*):?\s*$/i.test(text) ||
+             /^\d+\.\s+[A-Z][\w\s]*$/i.test(text);
+    };
+    
+    // Helper: Check if element or text starts with action verbs
+    const isActionParagraph = (text) => {
+      const actionVerbs = /^(Open|Click|Select|Scroll|Paste|Type|Ensure|Highlight|Enter|Press|Navigate|Go to|Access|Create|Delete|Edit|Update|Choose|Pick|Set|Configure|Enable|Disable|Install|Uninstall|Download|Upload|Import|Export|Copy|Move|Drag|Drop|Check|Uncheck|Mark|Unmark|Fill|Complete|Submit|Save|Cancel|Close|Expand|Collapse|View|Review|Verify|Confirm|Approve|Reject)\s+/i;
+      return actionVerbs.test(text.trim());
+    };
+    
+    // Helper: Check if text starts with "Note:"
+    const isNote = (text) => {
+      return /^Note:\s*/i.test(text.trim());
+    };
+    
+    // Helper: Extract images from an element
+    const extractImages = (element) => {
+      const images = [];
+      const imgElements = element.querySelectorAll('img');
+      imgElements.forEach(img => {
+        const src = img.getAttribute('src') || '';
+        const alt = img.getAttribute('alt') || '';
+        const sanitizedSrc = this.sanitizeImageUrl(src);
+        if (sanitizedSrc) {
+          images.push({
+            alt: alt,
+            dataUrlOrRemoteUrl: sanitizedSrc
+          });
+          img.setAttribute('src', sanitizedSrc);
+        } else {
+          img.remove();
+        }
+      });
+      return images;
+    };
+    
+    // Helper: Create step object
+    const createStep = (stepNumber, primaryTitle, substepLabel, content, images) => {
+      let title;
+      if (substepLabel) {
+        // Substep: "Step N – Primary / Substep" or "Step N.k ..."
+        title = `Step ${stepNumber} – ${primaryTitle} / ${substepLabel}`;
+      } else {
+        // Primary step without substeps
+        title = `Step ${stepNumber}: ${primaryTitle}`;
+      }
+      
+      return {
+        title: title,
+        bodyHtml: content,
+        images: images
+      };
+    };
+    
+    // Collect all nodes in order
+    const nodes = Array.from(body.childNodes);
+    let primarySteps = [];
+    let currentPrimary = null;
+    
+    // Phase 1: Group nodes into primary step blocks
+    for (let node of nodes) {
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      
+      const text = node.textContent.trim();
+      
+      // Check for "Step N:" marker in paragraph or heading
+      let stepInfo = null;
+      if (node.tagName === 'P' || node.tagName.match(/^H[1-6]$/)) {
+        stepInfo = parseStepMarker(text);
+      }
+      
+      if (stepInfo) {
+        // Start new primary step
+        if (currentPrimary) {
+          primarySteps.push(currentPrimary);
+        }
+        currentPrimary = {
+          number: stepInfo.number,
+          title: stepInfo.title,
+          nodes: []
+        };
+      } else if (currentPrimary && !isChapterHeading(text)) {
+        // Add to current primary step (skip chapter headings)
+        currentPrimary.nodes.push(node);
+      }
+    }
+    
+    // Add last primary step
+    if (currentPrimary) {
+      primarySteps.push(currentPrimary);
+    }
+    
+    // Phase 2: Segment each primary step into substeps
+    for (let primary of primarySteps) {
+      const substeps = [];
+      let i = 0;
+      
+      while (i < primary.nodes.length) {
+        const node = primary.nodes[i];
+        const tagName = node.tagName;
+        
+        // Case 1: List (UL/OL) - each <li> becomes a substep
+        if (tagName === 'UL' || tagName === 'OL') {
+          const listItems = node.querySelectorAll('li');
+          listItems.forEach((li, idx) => {
+            const substepContent = document.createElement('div');
+            substepContent.appendChild(li.cloneNode(true));
+            const images = extractImages(substepContent);
+            const sanitized = this.sanitizeHtmlContent(substepContent);
+            
+            // Create short label from list item text (first 50 chars)
+            const liText = li.textContent.trim();
+            const label = liText.length > 50 ? liText.substring(0, 47) + '...' : liText;
+            
+            substeps.push(createStep(primary.number, primary.title, label, sanitized.innerHTML, images));
+          });
+          i++;
+          continue;
+        }
+        
+        // Case 2: Table - attach to previous substep or create "Details" substep
+        if (tagName === 'TABLE') {
+          const tableContent = document.createElement('div');
+          tableContent.appendChild(node.cloneNode(true));
+          const images = extractImages(tableContent);
+          const sanitized = this.sanitizeHtmlContent(tableContent);
+          
+          if (substeps.length > 0) {
+            // Append to previous substep
+            const prev = substeps[substeps.length - 1];
+            prev.bodyHtml += '\n' + sanitized.innerHTML;
+            prev.images.push(...images);
+          } else {
+            // Create new "Details" substep
+            substeps.push(createStep(primary.number, primary.title, 'Details', sanitized.innerHTML, images));
+          }
+          i++;
+          continue;
+        }
+        
+        // Case 3: Paragraph - check if Note or action
+        if (tagName === 'P') {
+          const text = node.textContent.trim();
+          
+          // Note: attach to previous substep
+          if (isNote(text)) {
+            if (substeps.length > 0) {
+              const noteContent = document.createElement('div');
+              noteContent.appendChild(node.cloneNode(true));
+              const images = extractImages(noteContent);
+              const sanitized = this.sanitizeHtmlContent(noteContent);
+              
+              const prev = substeps[substeps.length - 1];
+              prev.bodyHtml += '\n' + sanitized.innerHTML;
+              prev.images.push(...images);
+            }
+            i++;
+            continue;
+          }
+          
+          // Action paragraph: create substep
+          if (isActionParagraph(text)) {
+            const substepContent = document.createElement('div');
+            substepContent.appendChild(node.cloneNode(true));
+            const images = extractImages(substepContent);
+            const sanitized = this.sanitizeHtmlContent(substepContent);
+            
+            const label = text.length > 50 ? text.substring(0, 47) + '...' : text;
+            substeps.push(createStep(primary.number, primary.title, label, sanitized.innerHTML, images));
+            i++;
+            continue;
+          }
+          
+          // Non-action paragraph: attach to previous substep if exists
+          if (substeps.length > 0) {
+            const content = document.createElement('div');
+            content.appendChild(node.cloneNode(true));
+            const images = extractImages(content);
+            const sanitized = this.sanitizeHtmlContent(content);
+            
+            const prev = substeps[substeps.length - 1];
+            prev.bodyHtml += '\n' + sanitized.innerHTML;
+            prev.images.push(...images);
+            i++;
+            continue;
+          }
+        }
+        
+        // Case 4: Other content - attach to previous substep or create generic substep
+        const otherContent = document.createElement('div');
+        otherContent.appendChild(node.cloneNode(true));
+        const images = extractImages(otherContent);
+        const sanitized = this.sanitizeHtmlContent(otherContent);
+        
+        if (substeps.length > 0) {
+          const prev = substeps[substeps.length - 1];
+          prev.bodyHtml += '\n' + sanitized.innerHTML;
+          prev.images.push(...images);
+        } else {
+          const text = node.textContent.trim();
+          const label = text.length > 50 ? text.substring(0, 47) + '...' : text;
+          substeps.push(createStep(primary.number, primary.title, label || 'Details', sanitized.innerHTML, images));
+        }
+        
+        i++;
+      }
+      
+      // If no substeps created, create one with all content
+      if (substeps.length === 0) {
+        const allContent = document.createElement('div');
+        primary.nodes.forEach(node => allContent.appendChild(node.cloneNode(true)));
+        const images = extractImages(allContent);
+        const sanitized = this.sanitizeHtmlContent(allContent);
+        
+        substeps.push(createStep(primary.number, primary.title, null, sanitized.innerHTML, images));
+      }
+      
+      // Add all substeps to steps array
+      steps.push(...substeps);
+    }
+    
+    return steps;
   },
 
   /**
@@ -2133,6 +2436,29 @@ const Articles = {
       }
       throw error;
     }
+  },
+
+  /**
+   * Dev helper: Log step extraction info for debugging
+   * Usage: Articles.logStepInfo(article)
+   * @param {Object} article - Article object
+   */
+  logStepInfo(article) {
+    console.group(`📄 Article: ${article.title}`);
+    console.log(`Total Steps: ${article.steps.length}`);
+    console.log(`Source: ${article.source}`);
+    console.log(`---`);
+    
+    article.steps.forEach((step, index) => {
+      console.group(`Step ${index + 1}: ${step.title}`);
+      console.log(`Index: ${step.index}`);
+      console.log(`Images: ${step.images.length}`);
+      console.log(`Body HTML length: ${step.bodyHtml.length} characters`);
+      console.log(`Body preview: ${step.bodyHtml.substring(0, 100).replace(/<[^>]+>/g, '')}...`);
+      console.groupEnd();
+    });
+    
+    console.groupEnd();
   }
 };
 
