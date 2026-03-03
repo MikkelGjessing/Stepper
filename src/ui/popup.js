@@ -786,21 +786,35 @@ function renderCompleteView() {
   
   const returnToStepBtn = document.getElementById('returnToStepBtn');
   if (returnToStepBtn) {
-    returnToStepBtn.onclick = () => {
-      // Return to last step in step-by-step view
-      currentStepIndex = totalSteps - 1;
-      setView(UI_STATE.ARTICLE);
-      renderStepView();
-    };
+    returnToStepBtn.onclick = handleReturnToStepView;
   }
   
   const searchNewFromCompleteBtn = document.getElementById('searchNewFromCompleteBtn');
   if (searchNewFromCompleteBtn) {
-    searchNewFromCompleteBtn.onclick = () => {
-      setView(UI_STATE.SEARCH);
-      searchInput.focus();
-    };
+    searchNewFromCompleteBtn.onclick = handleSearchNewFromComplete;
   }
+}
+
+/**
+ * Handle Return to Step-by-step button from complete view
+ * Returns to the last step in ARTICLE view
+ */
+function handleReturnToStepView() {
+  if (!currentSelectedArticle) return;
+  
+  const totalSteps = currentSelectedArticle.steps.length;
+  currentStepIndex = totalSteps - 1;
+  setView(UI_STATE.ARTICLE);
+  renderStepView();
+}
+
+/**
+ * Handle Search for new article button from complete view
+ * Returns to SEARCH view and focuses search input
+ */
+function handleSearchNewFromComplete() {
+  setView(UI_STATE.SEARCH);
+  searchInput.focus();
 }
 
 /**
