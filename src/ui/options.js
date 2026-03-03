@@ -240,33 +240,32 @@ async function handleResetToDefaults() {
   }
 }
 
+// Helper function to validate URL format
+function isValidUrl(url) {
+  if (!url) return true; // Empty URLs are considered valid (not required)
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Validate formats (only if values are provided) - does NOT block saving
 function validateFormats(settings) {
   // Only validate URL format if repoUrl is provided
-  if (settings.repoUrl) {
-    try {
-      new URL(settings.repoUrl);
-    } catch {
-      return 'Invalid Repository URL format';
-    }
+  if (settings.repoUrl && !isValidUrl(settings.repoUrl)) {
+    return 'Invalid Repository URL format';
   }
   
   // Only validate Azure API URL format if provided
-  if (settings.azureApiBaseUrl) {
-    try {
-      new URL(settings.azureApiBaseUrl);
-    } catch {
-      return 'Invalid Azure API URL format';
-    }
+  if (settings.azureApiBaseUrl && !isValidUrl(settings.azureApiBaseUrl)) {
+    return 'Invalid Azure API URL format';
   }
   
   // Only validate LLM endpoint format if provided
-  if (settings.llmEndpoint) {
-    try {
-      new URL(settings.llmEndpoint);
-    } catch {
-      return 'Invalid LLM endpoint URL format';
-    }
+  if (settings.llmEndpoint && !isValidUrl(settings.llmEndpoint)) {
+    return 'Invalid LLM endpoint URL format';
   }
   
   return null; // No validation errors
@@ -281,10 +280,8 @@ function validateSettingsForAction(settings, action) {
         return 'Please configure and save Repository URL before syncing';
       }
       
-      // Validate URL format
-      try {
-        new URL(settings.repoUrl);
-      } catch {
+      // Validate URL format using helper
+      if (!isValidUrl(settings.repoUrl)) {
         return 'Invalid Repository URL format. Please correct it before syncing';
       }
     } else if (settings.repoSourceType === 'azure') {
@@ -295,10 +292,8 @@ function validateSettingsForAction(settings, action) {
         return 'Please configure and save Azure PAT before syncing';
       }
       
-      // Validate Azure URL format
-      try {
-        new URL(settings.azureApiBaseUrl);
-      } catch {
+      // Validate Azure URL format using helper
+      if (!isValidUrl(settings.azureApiBaseUrl)) {
         return 'Invalid Azure API URL format. Please correct it before syncing';
       }
     }
