@@ -451,31 +451,31 @@ function renderStepView() {
   // Combine everything
   articleContentScrollable.innerHTML = headerHtml + stepContentHtml + bottomNavHtml;
   
-  // Add event listeners
+  // Add event listeners (using onclick to avoid duplicate listeners)
   const stepBackBtn = document.getElementById('stepBackBtn');
   if (stepBackBtn && currentStepIndex > 0) {
-    stepBackBtn.addEventListener('click', handleStepBack);
+    stepBackBtn.onclick = handleStepBack;
   }
   
   const stepContinueBtn = document.getElementById('stepContinueBtn');
   if (stepContinueBtn && currentStepIndex < totalSteps - 1) {
-    stepContinueBtn.addEventListener('click', handleStepContinue);
+    stepContinueBtn.onclick = handleStepContinue;
   }
   
   const viewFullArticleBtn = document.getElementById('viewFullArticleBtn');
   if (viewFullArticleBtn) {
-    viewFullArticleBtn.addEventListener('click', () => {
+    viewFullArticleBtn.onclick = () => {
       setView(UI_STATE.FULL_ARTICLE);
       renderFullArticleView();
-    });
+    };
   }
   
   const searchNewArticleBtn = document.getElementById('searchNewArticleBtn');
   if (searchNewArticleBtn) {
-    searchNewArticleBtn.addEventListener('click', () => {
+    searchNewArticleBtn.onclick = () => {
       setView(UI_STATE.SEARCH);
       searchInput.focus();
-    });
+    };
   }
 }
 
@@ -614,33 +614,33 @@ function renderFullArticleView() {
   // Combine everything
   fullArticleContentScrollable.innerHTML = headerHtml + stepsHtml;
   
-  // Add event listeners for navigation buttons
+  // Add event listeners for navigation buttons (using onclick to avoid duplicate listeners)
   const backToStepViewBtn = document.getElementById('backToStepViewBtn');
   if (backToStepViewBtn) {
-    backToStepViewBtn.addEventListener('click', () => {
+    backToStepViewBtn.onclick = () => {
       setView(UI_STATE.ARTICLE);
       renderStepView();
-    });
+    };
   }
   
   const jumpToCurrentStepBtn = document.getElementById('jumpToCurrentStepBtn');
   if (jumpToCurrentStepBtn) {
-    jumpToCurrentStepBtn.addEventListener('click', () => {
+    jumpToCurrentStepBtn.onclick = () => {
       const currentStepElement = document.getElementById(`full-article-step-${currentStepIndex}`);
       if (currentStepElement) {
         currentStepElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-    });
+    };
   }
   
   // Add click handlers to step headers to jump to that step in step-by-step view
   document.querySelectorAll('.full-article-step-header-clickable').forEach(header => {
-    header.addEventListener('click', (e) => {
+    header.onclick = () => {
       const stepIndex = parseInt(header.getAttribute('data-step-index'), 10);
       currentStepIndex = stepIndex;
       setView(UI_STATE.ARTICLE);
       renderStepView();
-    });
+    };
   });
 }
 
