@@ -1934,6 +1934,10 @@ const Articles = {
     const body = doc.body;
     if (!body) return steps;
     
+    // Constants
+    const MAX_LABEL_LENGTH = 50;
+    const LABEL_TRUNCATE_LENGTH = MAX_LABEL_LENGTH - 3; // Account for "..."
+    
     // Helper: Check if text matches "Step N:" pattern
     const isStepMarker = (text) => {
       return /^Step\s+(\d+)\s*:\s*(.+)$/i.test(text);
@@ -1950,15 +1954,20 @@ const Articles = {
     
     // Helper: Check if text is a chapter/section heading (not a step)
     const isChapterHeading = (text) => {
-      // Patterns like "Chapter 1:", "1. General info", "2. Procedure"
-      return /^(Chapter\s+\d+|[A-Z][\w\s]*):?\s*$/i.test(text) ||
-             /^\d+\.\s+[A-Z][\w\s]*$/i.test(text);
+      // Be specific: only match patterns like "Chapter 1:", "Chapter 2: Title", or numbered sections like "1. General info"
+      // Must have "Chapter" keyword OR be a single digit followed by period and capital letter
+      return /^Chapter\s+\d+(\s*:|$)/i.test(text) ||
+             /^\d+\.\s+[A-Z][A-Za-z\s]{2,}$/i.test(text); // At least 3 chars after number to avoid matching "1. Go"
     };
     
     // Helper: Check if element or text starts with action verbs
     const isActionParagraph = (text) => {
-      const actionVerbs = /^(Open|Click|Select|Scroll|Paste|Type|Ensure|Highlight|Enter|Press|Navigate|Go to|Access|Create|Delete|Edit|Update|Choose|Pick|Set|Configure|Enable|Disable|Install|Uninstall|Download|Upload|Import|Export|Copy|Move|Drag|Drop|Check|Uncheck|Mark|Unmark|Fill|Complete|Submit|Save|Cancel|Close|Expand|Collapse|View|Review|Verify|Confirm|Approve|Reject)\s+/i;
-      return actionVerbs.test(text.trim());
+      const trimmed = text.trim();
+      // Single-word action verbs
+      const singleWordVerbs = /^(Open|Click|Select|Scroll|Paste|Type|Ensure|Highlight|Enter|Press|Navigate|Access|Create|Delete|Edit|Update|Choose|Pick|Set|Configure|Enable|Disable|Install|Uninstall|Download|Upload|Import|Export|Copy|Move|Drag|Drop|Check|Uncheck|Mark|Unmark|Fill|Complete|Submit|Save|Cancel|Close|Expand|Collapse|View|Review|Verify|Confirm|Approve|Reject)\s+/i;
+      // Multi-word action phrases
+      const multiWordPhrases = /^(Go\s+to)\s+/i;
+      return singleWordVerbs.test(trimmed) || multiWordPhrases.test(trimmed);
     };
     
     // Helper: Check if text starts with "Note:"
@@ -2061,9 +2070,9 @@ const Articles = {
             const images = extractImages(substepContent);
             const sanitized = this.sanitizeHtmlContent(substepContent);
             
-            // Create short label from list item text (first 50 chars)
+            // Create short label from list item text
             const liText = li.textContent.trim();
-            const label = liText.length > 50 ? liText.substring(0, 47) + '...' : liText;
+            const label = liText.length > MAX_LABEL_LENGTH ? liText.substring(0, LABEL_TRUNCATE_LENGTH) + '...' : liText;
             
             substeps.push(createStep(primary.number, primary.title, label, sanitized.innerHTML, images));
           });
@@ -2118,7 +2127,7 @@ const Articles = {
             const images = extractImages(substepContent);
             const sanitized = this.sanitizeHtmlContent(substepContent);
             
-            const label = text.length > 50 ? text.substring(0, 47) + '...' : text;
+            const label = text.length > MAX_LABEL_LENGTH ? text.substring(0, LABEL_TRUNCATE_LENGTH) + '...' : text;
             substeps.push(createStep(primary.number, primary.title, label, sanitized.innerHTML, images));
             i++;
             continue;
@@ -2151,7 +2160,7 @@ const Articles = {
           prev.images.push(...images);
         } else {
           const text = node.textContent.trim();
-          const label = text.length > 50 ? text.substring(0, 47) + '...' : text;
+          const label = text.length > MAX_LABEL_LENGTH ? text.substring(0, LABEL_TRUNCATE_LENGTH) + '...' : text;
           substeps.push(createStep(primary.number, primary.title, label || 'Details', sanitized.innerHTML, images));
         }
         
