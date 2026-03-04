@@ -507,9 +507,11 @@ function renderStepView() {
   }
 
   // Asynchronously enrich the step body with any ID values found on the active tab
-  enrichStepWithPageIds(articleContentScrollable).catch(err => {
-    console.log('Page ID enrichment skipped:', err.message);
-  });
+  if (currentSettings && currentSettings.enablePageScanning) {
+    enrichStepWithPageIds(articleContentScrollable).catch(err => {
+      console.log('Page ID enrichment skipped:', err.message);
+    });
+  }
 }
 
 /**

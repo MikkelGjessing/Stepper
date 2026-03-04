@@ -103,7 +103,8 @@ const Storage = {
         enableLLMSearch: false,
         llmEndpoint: '',
         llmApiKey: '',
-        llmModel: 'gpt-3.5-turbo'
+        llmModel: 'gpt-3.5-turbo',
+        enablePageScanning: false
       };
     } catch (error) {
       console.error('Error getting settings:', error);
@@ -116,7 +117,8 @@ const Storage = {
         enableLLMSearch: false,
         llmEndpoint: '',
         llmApiKey: '',
-        llmModel: 'gpt-3.5-turbo'
+        llmModel: 'gpt-3.5-turbo',
+        enablePageScanning: false
       };
     }
   },
