@@ -35,6 +35,7 @@ const formFields = {
   azurePat: document.getElementById('azurePat'),
   enableDummyArticles: document.getElementById('enableDummyArticles'),
   enableLLMSearch: document.getElementById('enableLLMSearch'),
+  enablePageScanning: document.getElementById('enablePageScanning'),
   llmEndpoint: document.getElementById('llmEndpoint'),
   llmApiKey: document.getElementById('llmApiKey'),
   llmModel: document.getElementById('llmModel')
@@ -103,6 +104,7 @@ async function loadSettings() {
     formFields.azurePat.value = settings.azurePat || '';
     formFields.enableDummyArticles.checked = settings.enableDummyArticles !== false;
     formFields.enableLLMSearch.checked = settings.enableLLMSearch === true;
+    formFields.enablePageScanning.checked = settings.enablePageScanning === true;
     formFields.llmEndpoint.value = settings.llmEndpoint || '';
     formFields.llmApiKey.value = settings.llmApiKey || '';
     formFields.llmModel.value = settings.llmModel || 'gpt-3.5-turbo';
@@ -154,6 +156,7 @@ async function handleSaveSettings(event) {
       azurePat: formFields.azurePat.value.trim(),
       enableDummyArticles: formFields.enableDummyArticles.checked,
       enableLLMSearch: formFields.enableLLMSearch.checked,
+      enablePageScanning: formFields.enablePageScanning.checked,
       llmEndpoint: formFields.llmEndpoint.value.trim(),
       llmApiKey: formFields.llmApiKey.value.trim(),
       llmModel: formFields.llmModel.value.trim() || 'gpt-3.5-turbo'
@@ -214,7 +217,8 @@ async function handleResetToDefaults() {
       enableLLMSearch: false,
       llmEndpoint: '',
       llmApiKey: '',
-      llmModel: 'gpt-3.5-turbo'
+      llmModel: 'gpt-3.5-turbo',
+      enablePageScanning: false
     };
     
     const success = await Storage.setSettings(defaultSettings);
