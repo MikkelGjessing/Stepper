@@ -448,10 +448,18 @@ function renderStepView() {
     </div>
   `;
   
+  // Extract pure title: strip "Step N:" prefix if present (added by the parser)
+  let displayTitle = currentStep.title;
+  const stepPrefixMatch = displayTitle.match(/^Step\s+\d+\s*:\s*/i);
+  if (stepPrefixMatch) {
+    displayTitle = displayTitle.slice(stepPrefixMatch[0].length);
+  }
+
   // Render step content into the scrollable area
   articleContentScrollable.innerHTML = `
     <div class="step-view-content">
-      <h3 class="step-view-step-title">${escapeHtml(currentStep.title)}</h3>
+      <div class="step-label">STEP ${currentStepIndex + 1}</div>
+      <h3 class="step-view-step-title">${escapeHtml(displayTitle)}</h3>
       <div class="step-view-step-body">
         ${sanitizeHtml(currentStep.bodyHtml)}
         
@@ -999,13 +1007,47 @@ function wrapImagesWithPreview(container) {
 
 /**
  * Open the image modal viewer with the given image src and alt text.
+ * Sizes the image to 75% of its natural dimensions, constrained to 75vw × 75vh.
  */
 function openImageModal(src, alt) {
   const modal = document.getElementById('imageModal');
   const modalImg = document.getElementById('imageModalImg');
   if (!modal || !modalImg) return;
-  modalImg.src = src;
+
+  // Reset any previously-set inline size
+  modalImg.style.width = '';
+  modalImg.style.height = '';
   modalImg.alt = alt || '';
+  modalImg.src = src;
+
+  // Compute and apply target size once natural dimensions are known
+  const applySize = () => {
+    const nW = modalImg.naturalWidth;
+    const nH = modalImg.naturalHeight;
+    if (!nW || !nH) return;
+
+    let finalW = nW * 0.75;
+    let finalH = nH * 0.75;
+
+    // Constrain to 75vw × 75vh (keeping aspect ratio)
+    const maxW = window.innerWidth * 0.75;
+    const maxH = window.innerHeight * 0.75;
+    if (finalW > maxW || finalH > maxH) {
+      const scale = Math.min(maxW / finalW, maxH / finalH);
+      finalW = Math.round(finalW * scale);
+      finalH = Math.round(finalH * scale);
+    }
+
+    modalImg.style.width = finalW + 'px';
+    modalImg.style.height = finalH + 'px';
+  };
+
+  if (modalImg.complete && modalImg.naturalWidth) {
+    applySize();
+  } else {
+    modalImg.onload = applySize;
+  }
+
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
 }
@@ -1019,5 +1061,10 @@ function closeImageModal() {
   modal.style.display = 'none';
   document.body.style.overflow = '';
   const modalImg = document.getElementById('imageModalImg');
-  if (modalImg) modalImg.src = '';
+  if (modalImg) {
+    modalImg.src = '';
+    modalImg.style.width = '';
+    modalImg.style.height = '';
+    modalImg.onload = null;
+  }
 }

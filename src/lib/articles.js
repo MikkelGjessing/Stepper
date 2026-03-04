@@ -2048,146 +2048,21 @@ const Articles = {
       primarySteps.push(currentPrimary);
     }
     
-    // Phase 2: Segment each primary step into substeps
+    // Phase 2: Combine all nodes for each primary step into a single Step object.
+    // Substeps (lists, action paragraphs, numbered items) are preserved as-is inside
+    // bodyHtml so they render as bullets/paragraphs within the step — not split into
+    // separate Step objects.
     for (let primary of primarySteps) {
-      const substeps = [];
-      let i = 0;
-      
-      while (i < primary.nodes.length) {
-        const node = primary.nodes[i];
-        const tagName = node.tagName;
-        
-        // Case 1: List (UL/OL) - each <li> becomes a substep
-        if (tagName === 'UL' || tagName === 'OL') {
-          const listItems = node.querySelectorAll('li');
-          listItems.forEach((li, idx) => {
-            const substepContent = document.createElement('div');
-            substepContent.appendChild(li.cloneNode(true));
-            const images = extractImages(substepContent);
-            const sanitized = this.sanitizeHtmlContent(substepContent);
-            
-            // Create short label from list item text
-            const liText = li.textContent.trim();
-            const label = truncateLabel(liText);
-            
-            substeps.push(createStep(primary.number, primary.title, label, sanitized.innerHTML, images));
-          });
-          i++;
-          continue;
-        }
-        
-        // Case 2: Table - attach to previous substep or create "Details" substep
-        if (tagName === 'TABLE') {
-          const tableContent = document.createElement('div');
-          tableContent.appendChild(node.cloneNode(true));
-          const images = extractImages(tableContent);
-          const sanitized = this.sanitizeHtmlContent(tableContent);
-          
-          if (substeps.length > 0) {
-            // Append to previous substep
-            const prev = substeps[substeps.length - 1];
-            prev.bodyHtml += '\n' + sanitized.innerHTML;
-            prev.images.push(...images);
-          } else {
-            // Create new "Details" substep
-            substeps.push(createStep(primary.number, primary.title, 'Details', sanitized.innerHTML, images));
-          }
-          i++;
-          continue;
-        }
-        
-        // Case 3: Paragraph - check if Note or action
-        if (tagName === 'P') {
-          const text = node.textContent.trim();
-          
-          // Note: attach to previous substep
-          if (isNote(text)) {
-            if (substeps.length > 0) {
-              const noteContent = document.createElement('div');
-              noteContent.appendChild(node.cloneNode(true));
-              const images = extractImages(noteContent);
-              const sanitized = this.sanitizeHtmlContent(noteContent);
-              
-              const prev = substeps[substeps.length - 1];
-              prev.bodyHtml += '\n' + sanitized.innerHTML;
-              prev.images.push(...images);
-            }
-            i++;
-            continue;
-          }
-          
-          // Numbered/lettered item (e.g. "1. Open...", "a) Click..."): create individual substep
-          if (isNumberedItem(text)) {
-            const substepContent = document.createElement('div');
-            substepContent.appendChild(node.cloneNode(true));
-            const images = extractImages(substepContent);
-            const sanitized = this.sanitizeHtmlContent(substepContent);
-            
-            const label = truncateLabel(text);
-            substeps.push(createStep(primary.number, primary.title, label, sanitized.innerHTML, images));
-            i++;
-            continue;
-          }
-          
-          // Action paragraph: create substep
-          if (isActionParagraph(text)) {
-            const substepContent = document.createElement('div');
-            substepContent.appendChild(node.cloneNode(true));
-            const images = extractImages(substepContent);
-            const sanitized = this.sanitizeHtmlContent(substepContent);
-            
-            const label = truncateLabel(text);
-            substeps.push(createStep(primary.number, primary.title, label, sanitized.innerHTML, images));
-            i++;
-            continue;
-          }
-          
-          // Non-action paragraph: attach to previous substep if exists
-          if (substeps.length > 0) {
-            const content = document.createElement('div');
-            content.appendChild(node.cloneNode(true));
-            const images = extractImages(content);
-            const sanitized = this.sanitizeHtmlContent(content);
-            
-            const prev = substeps[substeps.length - 1];
-            prev.bodyHtml += '\n' + sanitized.innerHTML;
-            prev.images.push(...images);
-            i++;
-            continue;
-          }
-        }
-        
-        // Case 4: Other content - attach to previous substep or create generic substep
-        const otherContent = document.createElement('div');
-        otherContent.appendChild(node.cloneNode(true));
-        const images = extractImages(otherContent);
-        const sanitized = this.sanitizeHtmlContent(otherContent);
-        
-        if (substeps.length > 0) {
-          const prev = substeps[substeps.length - 1];
-          prev.bodyHtml += '\n' + sanitized.innerHTML;
-          prev.images.push(...images);
-        } else {
-          const text = node.textContent.trim();
-          const label = truncateLabel(text);
-          substeps.push(createStep(primary.number, primary.title, label || 'Details', sanitized.innerHTML, images));
-        }
-        
-        i++;
-      }
-      
-      // If no substeps created, create one with all content
-      if (substeps.length === 0) {
-        const allContent = document.createElement('div');
-        primary.nodes.forEach(node => allContent.appendChild(node.cloneNode(true)));
-        const images = extractImages(allContent);
-        const sanitized = this.sanitizeHtmlContent(allContent);
-        
-        substeps.push(createStep(primary.number, primary.title, null, sanitized.innerHTML, images));
-      }
-      
-      // Add all substeps to steps array
-      steps.push(...substeps);
+      const allContent = document.createElement('div');
+      primary.nodes.forEach(node => allContent.appendChild(node.cloneNode(true)));
+      const images = extractImages(allContent);
+      const sanitized = this.sanitizeHtmlContent(allContent);
+
+      steps.push({
+        title: `Step ${primary.number}: ${primary.title}`,
+        bodyHtml: sanitized.innerHTML,
+        images: images
+      });
     }
     
     return steps;
