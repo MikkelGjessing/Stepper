@@ -78,6 +78,33 @@ function setupEventListeners() {
     await loadArticles();
     showNotification('Articles refreshed');
   });
+
+  // Keyboard navigation for ARTICLE mode
+  document.addEventListener('keydown', (e) => {
+    if (currentUIState !== UI_STATE.ARTICLE) return;
+    const target = e.target;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+
+    switch (e.key) {
+      case 'ArrowRight':
+      case 'Enter': {
+        e.preventDefault();
+        if (currentSelectedArticle && currentStepIndex === currentSelectedArticle.steps.length - 1) {
+          handleCompleteProcess();
+        } else {
+          handleStepContinue();
+        }
+        break;
+      }
+      case 'ArrowLeft':
+      case 'Backspace':
+        if (currentStepIndex > 0) {
+          e.preventDefault();
+          handleStepBack();
+        }
+        break;
+    }
+  });
 }
 
 /**
@@ -385,24 +412,24 @@ function renderStepView() {
   const totalSteps = steps.length;
   const currentStep = steps[currentStepIndex];
   
+  const articleHeader = document.getElementById('articleHeader');
   const articleContentScrollable = document.getElementById('articleContentScrollable');
+  const articleNavContainer = document.getElementById('articleNavContainer');
+  const stepCounterEl = document.getElementById('stepCounter');
   
   // Calculate progress percentage
   const progressPercentage = ((currentStepIndex + 1) / totalSteps) * 100;
   
-  // Build sticky header with progress
-  let headerHtml = `
-    <div class="step-view-header">
-      <h2 class="step-view-title">${escapeHtml(article.title)}</h2>
-      <div class="step-progress-info">Step ${currentStepIndex + 1} of ${totalSteps}</div>
-      <div class="progress-bar-container">
-        <div class="progress-bar-fill" style="width: ${progressPercentage}%"></div>
-      </div>
+  // Render header: article title + progress bar only (no step counter text)
+  articleHeader.innerHTML = `
+    <h2 class="step-view-title">${escapeHtml(article.title)}</h2>
+    <div class="progress-bar-container">
+      <div class="progress-bar-fill" style="width: ${progressPercentage}%"></div>
     </div>
   `;
   
-  // Build step content
-  let stepContentHtml = `
+  // Render step content into the scrollable area
+  articleContentScrollable.innerHTML = `
     <div class="step-view-content">
       <h3 class="step-view-step-title">${escapeHtml(currentStep.title)}</h3>
       <div class="step-view-step-body">
@@ -435,31 +462,30 @@ function renderStepView() {
     </div>
   `;
   
-  // Build sticky bottom navigation
+  // Build nav buttons for footer
   const isLastStep = currentStepIndex === totalSteps - 1;
-  
-  // Determine which navigation button to show
   const navButtonHtml = isLastStep 
     ? '<button class="nav-btn primary-btn" id="completeProcessBtn">✓ Complete process</button>'
     : '<button class="nav-btn primary-btn" id="stepContinueBtn">Continue →</button>';
   
-  let bottomNavHtml = `
-    <div class="step-view-bottom-nav">
-      <div class="step-nav-row">
-        <button class="nav-btn secondary-btn" id="stepBackBtn" ${currentStepIndex === 0 ? 'disabled' : ''}>
-          ← Back
-        </button>
-        ${navButtonHtml}
-      </div>
-      <div class="step-action-row">
-        <button class="action-btn secondary-btn" id="viewFullArticleBtn">📄 View full article</button>
-        <button class="action-btn secondary-btn" id="searchNewArticleBtn">🔍 Search for new article</button>
-      </div>
+  // Render nav buttons into the footer container
+  articleNavContainer.innerHTML = `
+    <div class="step-nav-row">
+      <button class="nav-btn secondary-btn" id="stepBackBtn" ${currentStepIndex === 0 ? 'disabled' : ''}>
+        ← Back
+      </button>
+      ${navButtonHtml}
+    </div>
+    <div class="step-action-row">
+      <button class="action-btn secondary-btn" id="viewFullArticleBtn">📄 View full article</button>
+      <button class="action-btn secondary-btn" id="searchNewArticleBtn">🔍 Search for new article</button>
     </div>
   `;
   
-  // Combine everything
-  articleContentScrollable.innerHTML = headerHtml + stepContentHtml + bottomNavHtml;
+  // Update step counter label below the buttons
+  if (stepCounterEl) {
+    stepCounterEl.textContent = `Step ${currentStepIndex + 1} of ${totalSteps}`;
+  }
   
   // Add event listeners (using onclick to avoid duplicate listeners)
   const stepBackBtn = document.getElementById('stepBackBtn');
