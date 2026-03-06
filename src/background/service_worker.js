@@ -463,8 +463,15 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
       // Basic HTML sanitization (removes script/iframe/object/embed)
       const safeHtml = sanitizeHtml(rawHtml);
 
-      // Segment HTML body into steps
+      // Segment HTML body into steps using the shared pipeline
       const steps = segmentHtmlIntoSteps(safeHtml, title);
+
+      // Debug logging: compare with Articles.logStepInfo() for uploaded articles
+      const procedureFound = /\bprocedure\b/i.test(safeHtml);
+      console.log(
+        `[ServiceNow Import] source=servicenow | title="${title}" | procedureSection=${procedureFound} | steps=${steps.length}` +
+        (steps.length > 0 ? ` | titles: ${steps.map(s => s.title).join(' | ')}` : '')
+      );
 
       const article = {
         id: null, // resolved during upsert below
@@ -537,8 +544,160 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
 }
 
 /**
+ * Remove ServiceNow UI chrome and noise from a raw HTML string.
+ * Called before step segmentation to strip artefacts such as "Leave a comment",
+ * "Copy Permalink", and form elements that appear in ServiceNow article exports.
+ *
+ * NOTE: Service workers do not have access to DOMParser, so this function uses
+ * string-based regex processing.  For typical KB articles (a few KB of HTML)
+ * the performance is negligible.  The regexes are applied to already-sanitised
+ * HTML (scripts/iframes removed by sanitizeHtml() first), so the content is
+ * well-formed enough for these patterns to work reliably.
+ * @param {string} html
+ * @returns {string} Cleaned HTML string
+ */
+function normalizeServiceNowHtml(html) {
+  if (!html) return '';
+
+  // Remove entire <form> blocks (handles "Top of Form" / "Bottom of Form" wrappers)
+  html = html.replace(/<form[\s\S]*?<\/form>/gi, '');
+
+  // Remove individual form-control elements
+  html = html.replace(/<(?:input|button|textarea|select)[^>]*\/?>/gi, '');
+
+  // ServiceNow UI-noise patterns: remove any block/inline element whose sole text
+  // content matches a known noise phrase.  We iterate replacements so nested tags are caught.
+  const SN_NOISE = [
+    /^leave\s+a\s+comment/i,
+    /^copy\s+permalink$/i,
+    /^top\s+of\s+form$/i,
+    /^bottom\s+of\s+form$/i
+  ];
+  html = html.replace(
+    /<(p|div|span|a|li|td|th)([^>]*)>([\s\S]*?)<\/\1>/gi,
+    (match, tag, attrs, inner) => {
+      const text = htmlToPlainText(inner).trim();
+      if (text && SN_NOISE.some(re => re.test(text))) return '';
+      return match;
+    }
+  );
+
+  // Convert non-breaking spaces and similar whitespace to regular spaces
+  html = html.replace(/&nbsp;/gi, ' ').replace(/\u00a0/g, ' ');
+
+  return html;
+}
+
+/**
+ * Extract the "Procedure" section from a ServiceNow KB article HTML string.
+ * Locates the heading that matches "2. Procedure" / "Procedure (how to)" etc. and
+ * returns the HTML between that heading and the next numbered top-level section.
+ * Returns null when no Procedure heading is found.
+ * @param {string} html
+ * @returns {string|null}
+ */
+function extractProcedureSection(html) {
+  if (!html) return null;
+
+  // Collect all h1–h6 headings with their positions
+  const headingRe = /<(h[1-6])([^>]*)>([\s\S]*?)<\/\1>/gi;
+  const headings = [];
+  let m;
+  while ((m = headingRe.exec(html)) !== null) {
+    const text = htmlToPlainText(m[3]).trim();
+    headings.push({ text, index: m.index, endIndex: m.index + m[0].length });
+  }
+
+  // Find the first heading whose text mentions "procedure"
+  let procedureIdx = -1;
+  for (let i = 0; i < headings.length; i++) {
+    if (/\bprocedure\b/i.test(headings[i].text)) {
+      procedureIdx = i;
+      break;
+    }
+  }
+  if (procedureIdx === -1) return null;
+
+  const contentStart = headings[procedureIdx].endIndex;
+
+  // Content ends before the next top-level numbered section heading or known section names
+  let contentEnd = html.length;
+  for (let i = procedureIdx + 1; i < headings.length; i++) {
+    const t = headings[i].text;
+    if (/^\d+\.\s/.test(t) || /^(?:related|general)\s+info/i.test(t) || /^appendix/i.test(t)) {
+      contentEnd = headings[i].index;
+      break;
+    }
+  }
+
+  return html.slice(contentStart, contentEnd);
+}
+
+/**
+ * Find all "Step N:" / "Step N – Title" marker positions inside an HTML string.
+ * Strips inner HTML tags before applying the step pattern so that markers nested
+ * inside <strong>, <em>, or other inline elements are still detected.
+ *
+ * NOTE: Service workers do not have access to DOMParser.  The regex here uses
+ * backreferences to ensure opening/closing tags are balanced.  For typical KB
+ * article content (well-formed, no deeply-nested same-type block elements) this
+ * is both correct and fast enough.
+ * @param {string} html
+ * @returns {Array<{index:number,endIndex:number,stepNum:number,stepTitle:string}>}
+ */
+function findStepMarkers(html) {
+  const markers = [];
+  // Match any block-level element (p or h1–h6), non-greedy on content
+  const blockRe = /<(h[1-6]|p)(?:\s[^>]*)?>[\s\S]*?<\/\1>/gi;
+  const stepRe = /^Step\s+(\d+)\s*[:\-–]\s*(.+)$/i;
+  let m;
+  while ((m = blockRe.exec(html)) !== null) {
+    const textContent = htmlToPlainText(m[0]).trim();
+    const stepMatch = textContent.match(stepRe);
+    if (stepMatch) {
+      markers.push({
+        index: m.index,
+        endIndex: m.index + m[0].length,
+        stepNum: parseInt(stepMatch[1], 10),
+        stepTitle: stepMatch[2].trim()
+      });
+    }
+  }
+  return markers;
+}
+
+/**
+ * Build step objects from step-marker positions.
+ * Produces title format "Step N: Title" to match the DOM-based segmentIntoSteps().
+ * @param {string} html
+ * @param {Array} markers - From findStepMarkers()
+ * @returns {Array<{index:number,title:string,bodyHtml:string,images:Array}>}
+ */
+function buildStepsFromStepMarkers(html, markers) {
+  const steps = [];
+  for (let i = 0; i < markers.length; i++) {
+    const marker = markers[i];
+    const bodyStart = marker.endIndex;
+    const bodyEnd = i + 1 < markers.length ? markers[i + 1].index : html.length;
+    steps.push({
+      index: marker.stepNum,
+      title: `Step ${marker.stepNum}: ${marker.stepTitle}`,
+      bodyHtml: html.slice(bodyStart, bodyEnd).trim(),
+      images: []
+    });
+  }
+  return steps;
+}
+
+/**
  * Segment an HTML string into Step objects (service-worker version).
- * Uses H2 elements as step boundaries; falls back to a single "Procedure" step.
+ * Mirrors the three-level fallback used by the DOM-based segmentIntoSteps() in
+ * articles.js so that ServiceNow articles are processed the same way as uploads:
+ *   1. Normalize ServiceNow noise
+ *   2. Focus on the Procedure section (if present)
+ *   3. "Step N:" marker segmentation
+ *   4. H2-based segmentation fallback
+ *   5. Single-step fallback
  * @param {string} html
  * @param {string} articleTitle
  * @returns {Array<{index:number,title:string,bodyHtml:string,images:Array}>}
@@ -548,42 +707,26 @@ function segmentHtmlIntoSteps(html, articleTitle) {
     return [{ index: 1, title: 'Procedure', bodyHtml: '', images: [] }];
   }
 
-  // Step-marker pattern: "Step 1: Title" or "Step 1 – Title"
-  const stepPattern = /step\s+(\d+)\s*[:\-–]\s*(.+)/i;
-  const stepMarkerMatches = [...html.matchAll(new RegExp(
-    '<(?:h[1-6]|p)[^>]*>\\s*' + stepPattern.source + '\\s*</(?:h[1-6]|p)>',
-    'gi'
-  ))];
+  // Step 1: Strip ServiceNow UI chrome / noise
+  html = normalizeServiceNowHtml(html);
 
-  if (stepMarkerMatches.length > 0) {
-    return buildStepsFromMarkers(html, stepMarkerMatches);
+  // Step 2: Focus on the Procedure section when the article has section structure
+  const procedureHtml = extractProcedureSection(html) || html;
+
+  // Step 3: "Step N:" marker segmentation (robust – handles HTML-wrapped text)
+  const stepMarkers = findStepMarkers(procedureHtml);
+  if (stepMarkers.length > 0) {
+    return buildStepsFromStepMarkers(procedureHtml, stepMarkers);
   }
 
-  // Fall back to H2-based segmentation
-  const h2Pattern = /<h2[^>]*>(.*?)<\/h2>/gi;
-  const h2Matches = [...html.matchAll(h2Pattern)];
-
+  // Step 4: H2-based fallback
+  const h2Matches = [...procedureHtml.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/gi)];
   if (h2Matches.length > 0) {
-    return buildStepsFromH2(html, h2Matches);
+    return buildStepsFromH2(procedureHtml, h2Matches);
   }
 
-  // Single-step fallback
-  return [{ index: 1, title: articleTitle || 'Procedure', bodyHtml: html, images: [] }];
-}
-
-function buildStepsFromMarkers(html, matches) {
-  const steps = [];
-  for (let i = 0; i < matches.length; i++) {
-    const start = matches[i].index + matches[i][0].length;
-    const end = i + 1 < matches.length ? matches[i + 1].index : html.length;
-    steps.push({
-      index: parseInt(matches[i][1], 10),
-      title: matches[i][2].trim(),
-      bodyHtml: html.slice(start, end).trim(),
-      images: []
-    });
-  }
-  return steps;
+  // Step 5: Single-step fallback
+  return [{ index: 1, title: articleTitle || 'Procedure', bodyHtml: procedureHtml, images: [] }];
 }
 
 function buildStepsFromH2(html, matches) {
@@ -602,6 +745,7 @@ function buildStepsFromH2(html, matches) {
   }
   return steps;
 }
+
 
 /**
  * Basic HTML sanitizer for the service worker context.
