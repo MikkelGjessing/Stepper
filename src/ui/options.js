@@ -523,6 +523,15 @@ async function handleSnTest() {
     return;
   }
 
+  // Warn if credentials still contain placeholder values
+  if (
+    snSettings.username === '__SERVICENOW_USERNAME__' ||
+    snSettings.password === '__SERVICENOW_PASSWORD__'
+  ) {
+    showSnStatus('⚠ Update username/password before testing – placeholder values are still set', 'error');
+    return;
+  }
+
   snTestBtn.disabled = true;
   snTestBtn.textContent = '⏳ Testing…';
   showSnStatus('Testing connection…', 'info');
@@ -549,6 +558,17 @@ async function handleSnTest() {
 
 /** Extract (sync) articles from ServiceNow using stored settings */
 async function handleSnExtract() {
+  // Check stored settings for placeholder credentials before starting
+  const storedSettings = await Storage.getSettings();
+  const storedSn = storedSettings.serviceNow || {};
+  if (
+    storedSn.username === '__SERVICENOW_USERNAME__' ||
+    storedSn.password === '__SERVICENOW_PASSWORD__'
+  ) {
+    showSnStatus('⚠ Update and save real username/password before extracting – placeholder values are still set', 'error');
+    return;
+  }
+
   snExtractBtn.disabled = true;
   snExtractBtn.textContent = '⏳ Syncing…';
   showSnStatus('Syncing articles from ServiceNow…', 'info');
@@ -572,7 +592,13 @@ async function handleSnExtract() {
 }
 
 /** Show a status message in the ServiceNow status area */
+let _snStatusTimer = null;
 function showSnStatus(message, type = 'info') {
+  // Clear any previously scheduled auto-clear
+  if (_snStatusTimer !== null) {
+    clearTimeout(_snStatusTimer);
+    _snStatusTimer = null;
+  }
   snStatus.textContent = message;
   snStatus.style.color =
     type === 'success' ? '#28a745' :
@@ -581,8 +607,9 @@ function showSnStatus(message, type = 'info') {
   snStatus.style.fontWeight = '500';
 
   // Auto-clear after 10 s
-  setTimeout(() => {
+  _snStatusTimer = setTimeout(() => {
     snStatus.textContent = '';
+    _snStatusTimer = null;
   }, 10000);
 }
 

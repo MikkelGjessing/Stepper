@@ -64,7 +64,10 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     console.log('Articles array initialized');
   }
 
-  // Schedule weekly ServiceNow sync (10080 minutes = 7 days)
+  // Schedule weekly ServiceNow sync (10080 minutes = 7 days).
+  // chrome.alarms.create() is idempotent by name: if the alarm already exists
+  // it is simply updated (its schedule resets). This is intentional – we want
+  // the period to reflect any changes made to this value after an extension update.
   chrome.alarms.create('servicenow-weekly-sync', { periodInMinutes: 10080 });
   console.log('ServiceNow weekly sync alarm scheduled');
 
@@ -72,7 +75,9 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   await maybeRunInitialServiceNowSync();
 });
 
-// Re-schedule alarm on startup (service workers can be killed and restarted)
+// Re-schedule alarm on startup (service workers can be killed and restarted).
+// Recreating the alarm resets its schedule from "now", which is acceptable –
+// the worker could have been idle for days before restarting.
 chrome.runtime.onStartup.addListener(async () => {
   chrome.alarms.create('servicenow-weekly-sync', { periodInMinutes: 10080 });
   await maybeRunInitialServiceNowSync();
@@ -83,7 +88,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'servicenow-weekly-sync') {
     const { settings } = await chrome.storage.local.get('settings');
     const sn = { ...getDefaultServiceNowSettings(), ...(settings?.serviceNow || {}) };
-    if (sn.enabled && sn.autoSyncWeekly) {
+    if (
+      sn.enabled &&
+      sn.autoSyncWeekly &&
+      sn.username !== '__SERVICENOW_USERNAME__' &&
+      sn.password !== '__SERVICENOW_PASSWORD__'
+    ) {
       console.log('ServiceNow weekly alarm fired – starting sync');
       await runServiceNowSync(sn);
     }
@@ -92,13 +102,19 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 /**
  * Run an initial sync when the extension is first installed or started,
- * but only if ServiceNow sync is enabled and has never been run before.
+ * but only if ServiceNow sync is enabled, has real credentials (not placeholders),
+ * and has never been run before.
  */
 async function maybeRunInitialServiceNowSync() {
   try {
     const { settings } = await chrome.storage.local.get('settings');
     const sn = { ...getDefaultServiceNowSettings(), ...(settings?.serviceNow || {}) };
-    if (sn.enabled && !sn.lastSyncAt) {
+    if (
+      sn.enabled &&
+      !sn.lastSyncAt &&
+      sn.username !== '__SERVICENOW_USERNAME__' &&
+      sn.password !== '__SERVICENOW_PASSWORD__'
+    ) {
       console.log('Running initial ServiceNow sync (never synced before)');
       await runServiceNowSync(sn);
     }
@@ -278,7 +294,10 @@ async function fetchServiceNowArticles(sn) {
   let offset = 0;
   const allArticles = [];
 
-  // Safety guard: max pages to avoid infinite loops on misconfigured APIs
+  // Safety guard: max pages to avoid infinite loops on misconfigured APIs.
+  // At PAGE_SIZE=100 this caps fetches at 5 000 articles per sync.
+  // If your ServiceNow instance has more matching articles, increase MAX_PAGES
+  // or narrow the sysparm_query filter.
   const MAX_PAGES = 50;
 
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -347,6 +366,9 @@ function buildServiceNowUrl(baseUrl, filter, limit, offset) {
 
 /**
  * Build Basic Authorization header value.
+ * Basic auth encodes credentials as base64 (not encrypted) so the connection
+ * MUST use HTTPS – which is enforced by the manifest host_permission pattern
+ * (https://nets.service-now.com/*) and the default baseUrl.
  * The value itself is never logged or stored in a visible location.
  * @param {string} username
  * @param {string} password
@@ -529,9 +551,11 @@ function buildStepsFromH2(html, matches) {
   for (let i = 0; i < matches.length; i++) {
     const start = matches[i].index + matches[i][0].length;
     const end = i + 1 < matches.length ? matches[i + 1].index : html.length;
+    // Extract plain-text title: remove all HTML tags, then decode common entities
+    const rawTitle = htmlToPlainText(matches[i][1]);
     steps.push({
       index: i + 1,
-      title: matches[i][1].replace(/<[^>]+>/g, '').trim(),
+      title: rawTitle,
       bodyHtml: html.slice(start, end).trim(),
       images: []
     });
@@ -541,21 +565,52 @@ function buildStepsFromH2(html, matches) {
 
 /**
  * Basic HTML sanitizer for the service worker context.
- * Removes dangerous tags (script, iframe, object, embed).
+ * Removes dangerous tags (script, iframe, object, embed) by repeatedly
+ * stripping them until the string no longer changes, preventing bypass
+ * via nested or malformed tag injection.
  * @param {string} html
  * @returns {string}
  */
 function sanitizeHtml(html) {
   if (!html) return '';
-  return html.replace(/<(script|iframe|object|embed)[\s\S]*?<\/\1>/gi, '')
-             .replace(/<(script|iframe|object|embed)[^>]*\/?\s*>/gi, '');
+  // Iteratively remove dangerous tags until stable (prevents nested-tag bypass)
+  const DANGEROUS = /<(script|iframe|object|embed)[\s\S]*?<\/\1>|<(script|iframe|object|embed)[^>]*\/?>/gi;
+  let prev;
+  let result = html;
+  do {
+    prev = result;
+    result = prev.replace(DANGEROUS, '');
+  } while (result !== prev);
+  return result;
 }
 
 /**
- * Return a user-friendly error message for an HTTP status code.
- * @param {number} status
+ * Extract plain text from an HTML string by replacing all angle-bracket
+ * delimited sequences with an empty string, then decoding common entities.
+ * Used only for step-title extraction where HTML markup is unwanted.
+ * @param {string} html
  * @returns {string}
  */
+function htmlToPlainText(html) {
+  if (!html) return '';
+  // Replace anything between < and > (greedy enough to cover tag content)
+  // then decode common HTML entities to restore readable text.
+  // NOTE: &amp; is decoded LAST to avoid double-unescaping (e.g. &amp;lt; → < instead of &lt;)
+  return html
+    .split('<').join('\x00')  // mark each < so we can detect the boundary
+    .split('>').join('\x01')  // mark each >
+    .replace(/\x00[^\x01]*\x01/g, '') // remove \x00....\x01 (tag contents)
+    .replace(/\x00|\x01/g, '')        // remove any remaining markers
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')          // decode &amp; last to prevent double-unescaping
+    .trim();
+}
+
+
 function classifyHttpError(status) {
   if (status === 401 || status === 403) return 'Authentication failed: check username and password';
   if (status === 404) return 'Knowledge API endpoint not found: verify Base URL and that the sn_km_api plugin is enabled';
