@@ -21,14 +21,32 @@ function defaultServiceNowSettings() {
     baseUrl: 'https://nets.service-now.com/api/sn_km_api/knowledge/articles',
     // Default filter: published articles with > 100 views
     filter: 'workflow_state=published^sys_view_count>100',
-    // Replace placeholder values with real credentials before deploying
-    username: '__SERVICENOW_USERNAME__',
-    password: '__SERVICENOW_PASSWORD__',
+    username: 'Co-Pilot',
+    password: 'ejSHm*ScWIfV576@Z90rOoqF4wofHMX#mVOC|YSn',
     autoSyncWeekly: true,
     lastSyncAt: null,
     lastError: null,
     articleCount: 0
   };
+}
+
+/**
+ * Migrate any leftover placeholder tokens from an older installation.
+ * Only replaces the exact placeholder strings; all other values are left untouched.
+ * @param {Object} sn - Stored serviceNow settings object
+ * @returns {Object} Migrated settings (may be the same object reference if no migration needed)
+ */
+function migrateServiceNowPlaceholders(sn) {
+  if (!sn) return defaultServiceNowSettings();
+  const realDefaults = defaultServiceNowSettings();
+  const migrated = { ...sn };
+  if (migrated.username === '__SERVICENOW_USERNAME__') {
+    migrated.username = realDefaults.username;
+  }
+  if (migrated.password === '__SERVICENOW_PASSWORD__') {
+    migrated.password = realDefaults.password;
+  }
+  return migrated;
 }
 
 const Storage = {
@@ -136,11 +154,16 @@ const Storage = {
     try {
       const { settings } = await chrome.storage.local.get('settings');
       if (!settings) return base;
-      // Merge stored ServiceNow settings on top of defaults so new fields appear
+      // Merge stored ServiceNow settings on top of defaults so new fields appear,
+      // then migrate any leftover placeholder tokens from older installs.
+      const mergedSn = migrateServiceNowPlaceholders({
+        ...base.serviceNow,
+        ...(settings.serviceNow || {})
+      });
       return {
         ...base,
         ...settings,
-        serviceNow: { ...base.serviceNow, ...(settings.serviceNow || {}) }
+        serviceNow: mergedSn
       };
     } catch (error) {
       console.error('Error getting settings:', error);
@@ -232,4 +255,5 @@ const Storage = {
 if (typeof window !== 'undefined') {
   window.Storage = Storage;
   window.defaultServiceNowSettings = defaultServiceNowSettings;
+  window.migrateServiceNowPlaceholders = migrateServiceNowPlaceholders;
 }

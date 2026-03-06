@@ -18,13 +18,32 @@ function getDefaultServiceNowSettings() {
     enabled: true,
     baseUrl: 'https://nets.service-now.com/api/sn_km_api/knowledge/articles',
     filter: 'workflow_state=published^sys_view_count>100',
-    username: '__SERVICENOW_USERNAME__',
-    password: '__SERVICENOW_PASSWORD__',
+    username: 'Co-Pilot',
+    password: 'ejSHm*ScWIfV576@Z90rOoqF4wofHMX#mVOC|YSn',
     autoSyncWeekly: true,
     lastSyncAt: null,
     lastError: null,
     articleCount: 0
   };
+}
+
+/**
+ * Migrate any leftover placeholder tokens from an older installation.
+ * Only replaces the exact placeholder strings; all other values are left untouched.
+ * @param {Object} sn - Merged serviceNow settings object
+ * @returns {Object} Settings with placeholders replaced by real defaults
+ */
+function migrateServiceNowPlaceholders(sn) {
+  if (!sn) return getDefaultServiceNowSettings();
+  const realDefaults = getDefaultServiceNowSettings();
+  const migrated = { ...sn };
+  if (migrated.username === '__SERVICENOW_USERNAME__') {
+    migrated.username = realDefaults.username;
+  }
+  if (migrated.password === '__SERVICENOW_PASSWORD__') {
+    migrated.password = realDefaults.password;
+  }
+  return migrated;
 }
 
 // Initialize on install
@@ -55,6 +74,18 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       settings: { ...settings, serviceNow: getDefaultServiceNowSettings() }
     });
     console.log('ServiceNow settings initialized for existing installation');
+  } else {
+    // Existing installation with serviceNow settings – migrate any placeholder tokens
+    const migrated = migrateServiceNowPlaceholders(settings.serviceNow);
+    if (
+      migrated.username !== settings.serviceNow.username ||
+      migrated.password !== settings.serviceNow.password
+    ) {
+      await chrome.storage.local.set({
+        settings: { ...settings, serviceNow: migrated }
+      });
+      console.log('ServiceNow placeholder credentials migrated to real defaults');
+    }
   }
   
   // Initialize articles array if not present
@@ -87,7 +118,10 @@ chrome.runtime.onStartup.addListener(async () => {
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'servicenow-weekly-sync') {
     const { settings } = await chrome.storage.local.get('settings');
-    const sn = { ...getDefaultServiceNowSettings(), ...(settings?.serviceNow || {}) };
+    const sn = migrateServiceNowPlaceholders({
+      ...getDefaultServiceNowSettings(),
+      ...(settings?.serviceNow || {})
+    });
     if (
       sn.enabled &&
       sn.autoSyncWeekly &&
@@ -108,7 +142,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 async function maybeRunInitialServiceNowSync() {
   try {
     const { settings } = await chrome.storage.local.get('settings');
-    const sn = { ...getDefaultServiceNowSettings(), ...(settings?.serviceNow || {}) };
+    const sn = migrateServiceNowPlaceholders({
+      ...getDefaultServiceNowSettings(),
+      ...(settings?.serviceNow || {})
+    });
     if (
       sn.enabled &&
       !sn.lastSyncAt &&
@@ -179,7 +216,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  */
 async function handleSyncServiceNow() {
   const { settings } = await chrome.storage.local.get('settings');
-  const sn = { ...getDefaultServiceNowSettings(), ...(settings?.serviceNow || {}) };
+  const sn = migrateServiceNowPlaceholders({
+    ...getDefaultServiceNowSettings(),
+    ...(settings?.serviceNow || {})
+  });
   return await runServiceNowSync(sn);
 }
 
@@ -189,7 +229,7 @@ async function handleSyncServiceNow() {
  * @returns {Promise<Object>} { success, message }
  */
 async function handleTestServiceNow(snSettings) {
-  const sn = { ...getDefaultServiceNowSettings(), ...(snSettings || {}) };
+  const sn = migrateServiceNowPlaceholders({ ...getDefaultServiceNowSettings(), ...(snSettings || {}) });
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
