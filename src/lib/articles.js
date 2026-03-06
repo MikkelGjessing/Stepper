@@ -1669,6 +1669,56 @@ const Articles = {
   },
 
   /**
+   * Normalize a ServiceNow article Document by removing UI chrome and noise.
+   * Operates in-place on the parsed DOM so the caller can then use segmentIntoSteps().
+   *
+   * Removes:
+   *  - "Leave a comment" prompts
+   *  - "Copy Permalink" links/buttons
+   *  - "Top of Form" / "Bottom of Form" markers
+   *  - All <form>, <input>, <button>, <textarea>, <select> elements
+   *  - <script>, <style>, <iframe>, <object>, <embed> tags
+   *  - Non-breaking spaces converted to regular spaces (via text-node walk)
+   *
+   * @param {Document} doc - Parsed HTML document (mutated in-place)
+   * @returns {Document} The same document, normalised
+   */
+  normalizeServiceNowDoc(doc) {
+    // Remove dangerous / irrelevant structural tags
+    doc.querySelectorAll(
+      'script, style, iframe, object, embed, form, input, button, textarea, select'
+    ).forEach(el => el.remove());
+
+    // ServiceNow UI-noise patterns (matched against trimmed textContent of leaf/inline elements)
+    const SN_NOISE = [
+      /^leave\s+a\s+comment/i,
+      /^copy\s+permalink$/i,
+      /^top\s+of\s+form$/i,
+      /^bottom\s+of\s+form$/i
+    ];
+
+    // Walk all block and inline elements; remove those whose full text matches a noise pattern.
+    // We query broad selectors and use closest() to avoid removing a parent that has real children.
+    doc.querySelectorAll('p, div, span, a, li, td, th').forEach(el => {
+      const text = el.textContent.trim();
+      if (text && SN_NOISE.some(pattern => pattern.test(text))) {
+        el.remove();
+      }
+    });
+
+    // Replace non-breaking spaces with regular spaces in all text nodes
+    const walker = doc.createTreeWalker(doc.body || doc.documentElement, NodeFilter.SHOW_TEXT);
+    let textNode;
+    while ((textNode = walker.nextNode())) {
+      if (textNode.nodeValue.includes('\u00a0')) {
+        textNode.nodeValue = textNode.nodeValue.replace(/\u00a0/g, ' ');
+      }
+    }
+
+    return doc;
+  },
+
+  /**
    * Sanitize HTML content to remove dangerous elements and attributes
    * @param {Element} element - DOM element to sanitize
    * @returns {Element} Sanitized element
@@ -2037,8 +2087,16 @@ const Articles = {
           title: stepInfo.title,
           nodes: []
         };
-      } else if (currentPrimary && !isChapterHeading(node, text)) {
-        // Add to current primary step (skip chapter/section headings)
+      } else if (isChapterHeading(node, text)) {
+        // Chapter/section heading (e.g. "3. Related information") ends the current
+        // step block so that content from subsequent sections (Related info, etc.)
+        // is not appended to the last procedure step.
+        if (currentPrimary) {
+          primarySteps.push(currentPrimary);
+          currentPrimary = null;
+        }
+      } else if (currentPrimary) {
+        // Add node content to current primary step
         currentPrimary.nodes.push(node);
       }
     }
@@ -2365,12 +2423,66 @@ const Articles = {
           raw.text_html || raw.wiki || raw.text ||
           raw.description || raw.body || raw.content || '';
 
-        // Sanitize then segment into steps using the existing pipeline
-        const safeHtml = typeof this.sanitizeHtmlContent === 'function'
-          ? this.sanitizeHtmlContent(rawHtml)
-          : rawHtml;
+        // Parse into a DOM Document so we can use the same shared pipeline as
+        // uploaded HTML/DOCX articles (segmentIntoSteps expects a Document).
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(rawHtml || '', 'text/html');
 
-        const steps = this.segmentIntoSteps(safeHtml, title);
+        // Normalize: strip ServiceNow UI chrome and noise
+        this.normalizeServiceNowDoc(doc);
+
+        // Segment using the shared DOM-based pipeline
+        let steps = this.segmentIntoSteps(doc);
+
+        // Fallback: h2-based segmentation (reuses parseHtmlArticle logic)
+        if (steps.length === 0) {
+          const h2Elements = doc.querySelectorAll('h2');
+          if (h2Elements.length > 0) {
+            h2Elements.forEach((h2) => {
+              const stepTitle = h2.textContent.trim();
+              const stepContent = this.getContentUntilNextHeading(h2);
+              const images = [];
+              stepContent.querySelectorAll('img').forEach(img => {
+                const src = img.getAttribute('src') || '';
+                const alt = img.getAttribute('alt') || '';
+                const sanitizedSrc = this.sanitizeImageUrl(src);
+                if (sanitizedSrc) {
+                  images.push({ alt, dataUrlOrRemoteUrl: sanitizedSrc });
+                  img.setAttribute('src', sanitizedSrc);
+                } else {
+                  img.remove();
+                }
+              });
+              const sanitizedContent = this.sanitizeHtmlContent(stepContent);
+              steps.push({ title: stepTitle, bodyHtml: sanitizedContent.innerHTML, images });
+            });
+          }
+        }
+
+        // Final fallback: single-step article
+        if (steps.length === 0) {
+          const bodyContent = doc.body.cloneNode(true);
+          const images = [];
+          bodyContent.querySelectorAll('img').forEach(img => {
+            const src = img.getAttribute('src') || '';
+            const alt = img.getAttribute('alt') || '';
+            const sanitizedSrc = this.sanitizeImageUrl(src);
+            if (sanitizedSrc) {
+              images.push({ alt, dataUrlOrRemoteUrl: sanitizedSrc });
+              img.setAttribute('src', sanitizedSrc);
+            } else {
+              img.remove();
+            }
+          });
+          const sanitizedContent = this.sanitizeHtmlContent(bodyContent);
+          steps.push({ title: 'Procedure', bodyHtml: sanitizedContent.innerHTML, images });
+        }
+
+        // Add index to all steps
+        steps = steps.map((step, idx) => ({ index: idx + 1, ...step }));
+
+        // Debug logging
+        this._logServiceNowImport(title, doc, steps);
 
         const article = {
           // Stable ID: reuse existing record if present, else create new UUID
@@ -2480,6 +2592,32 @@ const Articles = {
       console.groupEnd();
     });
     
+    console.groupEnd();
+  },
+
+  /**
+   * Internal debug helper for ServiceNow import.
+   * Logs source, title, whether a Procedure section was found, step count and titles.
+   * Called automatically during importServiceNowArticles().
+   * @param {string} title - Article title
+   * @param {Document} doc - Normalised DOM document
+   * @param {Array} steps - Segmented steps array
+   */
+  _logServiceNowImport(title, doc, steps) {
+    // Detect whether a Procedure section heading was present in the document
+    let procedureFound = false;
+    if (doc && doc.querySelectorAll) {
+      doc.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(el => {
+        if (/procedure/i.test(el.textContent)) procedureFound = true;
+      });
+    }
+    console.group(`🔄 ServiceNow Import: ${title}`);
+    console.log(`Source: servicenow`);
+    console.log(`Procedure section found: ${procedureFound}`);
+    console.log(`Step count: ${steps.length}`);
+    if (steps.length > 0) {
+      console.log(`Step titles: ${steps.map(s => s.title).join(' | ')}`);
+    }
     console.groupEnd();
   }
 };
