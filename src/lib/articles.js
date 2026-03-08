@@ -7,10 +7,13 @@
  *   id: string (UUID),
  *   title: string,
  *   summary: string,
+ *   introHtml: string (optional, general info / intro section HTML),
+ *   relatedInfoHtml: string (optional, related information section HTML),
+ *   searchText: string (pre-computed normalised text for full-text search),
  *   tags: string[],
  *   estimatedMinutes: number (optional),
  *   steps: Step[],
- *   source: "dummy" | "uploaded" | "repo",
+ *   source: "dummy" | "uploaded" | "repo" | "servicenow",
  *   createdAt: string (ISO),
  *   updatedAt: string (ISO)
  * }
@@ -19,6 +22,7 @@
  * {
  *   index: number,
  *   title: string,
+ *   chapterTitle?: string (optional, for chaptered procedures),
  *   bodyHtml: string,
  *   images: Array<{ alt: string, dataUrlOrRemoteUrl: string }>
  * }
@@ -148,10 +152,13 @@ const Articles = {
           id: article.id || this.generateUUID(),
           title: article.title,
           summary: article.summary || '',
+          introHtml: article.introHtml || '',
+          relatedInfoHtml: article.relatedInfoHtml || '',
           tags: Array.isArray(article.tags) ? article.tags : [],
           estimatedMinutes: article.estimatedMinutes || null,
           steps: Array.isArray(article.steps) ? article.steps : [],
           source: article.source || 'uploaded',
+          searchText: article.searchText || '',
           createdAt: article.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
@@ -1213,6 +1220,8 @@ const Articles = {
           h2Elements.forEach(h2 => {
             // Strip "Step: " prefix for compatibility with legacy "## Step: Title" convention
             const stepTitle = h2.textContent.trim().replace(/^Step:\s*/i, '');
+            // Skip non-procedure sections (Related Info, Change Log, etc.)
+            if (this.isSkipSectionHeading(stepTitle) || this.isTagsSectionHeading(stepTitle)) return;
             const stepContent = this.getContentUntilNextHeading(h2);
             const images = [];
             const imgElements = stepContent.querySelectorAll('img');
@@ -1248,19 +1257,24 @@ const Articles = {
         ...step
       }));
 
+      const articleData = {
+        id: this.generateUUID(),
+        title: title,
+        summary: summary,
+        introHtml: '',
+        relatedInfoHtml: '',
+        tags: [],
+        estimatedMinutes: null,
+        steps: indexedSteps,
+        source: 'uploaded',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      articleData.searchText = this.buildSearchText(articleData);
+
       return {
         ok: true,
-        article: {
-          id: this.generateUUID(),
-          title: title,
-          summary: summary,
-          tags: [],
-          estimatedMinutes: null,
-          steps: indexedSteps,
-          source: 'uploaded',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        }
+        article: articleData
       };
     } catch (error) {
       console.error('Error parsing Markdown article:', error);
@@ -1372,6 +1386,8 @@ const Articles = {
         if (h2Elements.length > 0) {
           h2Elements.forEach((h2, index) => {
             const stepTitle = h2.textContent.trim();
+            // Skip non-procedure sections (Related Info, Change Log, tags, etc.)
+            if (this.isSkipSectionHeading(stepTitle) || this.isTagsSectionHeading(stepTitle)) return;
             const stepContent = this.getContentUntilNextHeading(h2);
             
             // Extract and sanitize images from step content
@@ -1441,20 +1457,25 @@ const Articles = {
         index: index + 1,
         ...step
       }));
-      
+
+      const articleData = {
+        id: this.generateUUID(),
+        title: title,
+        summary: summary,
+        introHtml: '',
+        relatedInfoHtml: '',
+        tags: [],
+        estimatedMinutes: null,
+        steps: steps,
+        source: 'uploaded',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      articleData.searchText = this.buildSearchText(articleData);
+
       return {
         ok: true,
-        article: {
-          id: this.generateUUID(),
-          title: title,
-          summary: summary,
-          tags: [],
-          estimatedMinutes: null,
-          steps: steps,
-          source: 'uploaded',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        }
+        article: articleData
       };
     } catch (error) {
       console.error('Error parsing HTML article:', error);
@@ -1572,6 +1593,8 @@ const Articles = {
           // Multiple steps based on h2 headings
           h2Elements.forEach((h2, index) => {
             const stepTitle = h2.textContent.trim();
+            // Skip non-procedure sections (Related Info, Change Log, tags, etc.)
+            if (this.isSkipSectionHeading(stepTitle) || this.isTagsSectionHeading(stepTitle)) return;
             const stepContent = this.getContentUntilNextHeading(h2);
 
             // Extract images from step content
@@ -1643,19 +1666,24 @@ const Articles = {
         ...step
       }));
 
+      const articleData = {
+        id: this.generateUUID(),
+        title: title,
+        summary: summary,
+        introHtml: '',
+        relatedInfoHtml: '',
+        tags: [],
+        estimatedMinutes: null,
+        steps: steps,
+        source: 'uploaded',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      articleData.searchText = this.buildSearchText(articleData);
+
       return {
         ok: true,
-        article: {
-          id: this.generateUUID(),
-          title: title,
-          summary: summary,
-          tags: [],
-          estimatedMinutes: null,
-          steps: steps,
-          source: 'uploaded',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        }
+        article: articleData
       };
     } catch (error) {
       console.error('Error parsing DOCX article:', error);
@@ -2122,7 +2150,15 @@ const Articles = {
         images: images
       });
     }
-    
+
+    // Phase 1.5: No "Step N:" markers found — try section-aware extraction.
+    // Handles: numbered paragraphs, ordered lists, procedural tables, and
+    // articles with explicit Procedure/Instructions section headings.
+    if (steps.length === 0) {
+      const altSteps = this._extractSectionAwareSteps(body, nodes);
+      altSteps.forEach(s => steps.push(s));
+    }
+
     return steps;
   },
 
@@ -2141,6 +2177,385 @@ const Articles = {
     }
     
     return container;
+  },
+
+  // ─── Universal section-heading classifiers ────────────────────────────────
+  // These detect recurring structural traits common across large KB collections
+  // so that parsers can decide which sections produce steps, which are intro
+  // content, and which should be ignored entirely.
+
+  /**
+   * Return true when the heading text identifies a section that must NOT
+   * produce procedure steps: Related Information, Change Log, Revision History,
+   * Appendix, etc.
+   * @param {string} text - Section heading text (trimmed)
+   * @returns {boolean}
+   */
+  isSkipSectionHeading(text) {
+    return /^(?:\d+\.\s*)?(?:related\s+(?:information|articles?|links?)|change\s+(?:log|histor(?:y|ies))|revision\s+histor(?:y|ies)|appendix)/i.test(text.trim());
+  },
+
+  /**
+   * Return true when the heading text identifies a procedure/instructions section.
+   * @param {string} text - Section heading text (trimmed)
+   * @returns {boolean}
+   */
+  isProcedureSectionHeading(text) {
+    return /^(?:\d+\.\s*)?(?:procedure|instructions?|steps?\b|how\s+to\b|process\b|work\s+instructions?)/i.test(text.trim());
+  },
+
+  /**
+   * Return true when the heading text identifies an intro/general-info section.
+   * @param {string} text - Section heading text (trimmed)
+   * @returns {boolean}
+   */
+  isIntroSectionHeading(text) {
+    return /^(?:\d+\.\s*)?(?:general\s+info(?:rmation)?|overview\b|introduction\b|summary\b|background\b)/i.test(text.trim());
+  },
+
+  /**
+   * Return true when the heading text identifies a keywords/tags section.
+   * @param {string} text - Section heading text (trimmed)
+   * @returns {boolean}
+   */
+  isTagsSectionHeading(text) {
+    return /^(?:keywords?|tags?)(?:\s*[:\-]|\s*$)/i.test(text.trim());
+  },
+
+  // ─── Universal step extraction helpers ───────────────────────────────────
+
+  /**
+   * Extract steps from a procedural HTML table.
+   * Detects tables with column headers like Step / Action / Description / Details
+   * and converts data rows into step objects.
+   * @param {Element} table - HTML table element
+   * @param {number} startIndex - Starting step number (1-based)
+   * @returns {Array<Object>} Step objects {title, bodyHtml, images}; empty if not procedural
+   */
+  extractTableSteps(table, startIndex) {
+    const steps = [];
+    if (!table || table.tagName !== 'TABLE') return steps;
+
+    const rows = Array.from(table.querySelectorAll('tr'));
+    if (rows.length < 2) return steps;
+
+    // Prefer thead row; fall back to first tr
+    const headerRow = table.querySelector('thead tr') || rows[0];
+    const headers = Array.from(headerRow.querySelectorAll('th, td'))
+      .map(cell => cell.textContent.trim().toLowerCase());
+
+    const STEP_COL  = /^(?:step|no\.?|#|nr\.?|step\s*#)$/i;
+    const ACTION_COL = /^(?:action|instruction|task|description|details?|procedure|what\s+to\s+do|activity)$/i;
+    const NOTE_COL   = /^(?:note|notes|warning|tip|important|remark|comment)$/i;
+    const IMAGE_COL  = /^(?:image|screenshot|figure|visual|img|illustration)$/i;
+
+    const actionColIdx = headers.findIndex(h => ACTION_COL.test(h));
+    const stepColIdx   = headers.findIndex(h => STEP_COL.test(h));
+
+    // Table is procedural only if it has an action column or a step number column
+    if (actionColIdx < 0 && stepColIdx < 0) return steps;
+
+    const noteColIdx = headers.findIndex(h => NOTE_COL.test(h));
+    const mainColIdx = actionColIdx >= 0 ? actionColIdx : 0;
+
+    // Data rows: skip thead rows
+    const dataRows = table.querySelector('thead')
+      ? Array.from(table.querySelectorAll('tbody tr'))
+      : rows.slice(1);
+
+    let stepNum = startIndex || 1;
+    let lastStep = null;
+
+    for (const row of dataRows) {
+      const cells = Array.from(row.querySelectorAll('td, th'));
+      if (cells.length === 0) continue;
+      if (cells.every(c => c.tagName === 'TH')) continue;
+
+      const mainCell = cells[mainColIdx];
+      if (!mainCell) continue;
+
+      const mainText = mainCell.textContent.trim();
+      if (!mainText) continue;
+
+      // Note/warning rows: attach to the previous step body
+      if (/^(?:Note|Warning|Important|Tip)[!:]/i.test(mainText) && lastStep) {
+        lastStep.bodyHtml += `<p class="step-note">${mainCell.innerHTML}</p>`;
+        continue;
+      }
+
+      // Build body HTML: main cell + any additional detail/note columns
+      const bodyParts = [mainCell.innerHTML];
+      cells.forEach((cell, idx) => {
+        if (idx === mainColIdx || idx === stepColIdx) return;
+        const cellText = cell.textContent.trim();
+        if (!cellText) return;
+        const header = headers[idx] || '';
+        if (NOTE_COL.test(header)) {
+          bodyParts.push(`<p class="step-note"><strong>Note:</strong> ${cell.innerHTML}</p>`);
+        } else if (!IMAGE_COL.test(header)) {
+          bodyParts.push(cell.innerHTML);
+        }
+      });
+
+      // Extract images from all cells in the row
+      const images = [];
+      cells.forEach(cell => {
+        cell.querySelectorAll('img').forEach(img => {
+          const src = img.getAttribute('src') || '';
+          const alt = img.getAttribute('alt') || '';
+          const sanitizedSrc = this.sanitizeImageUrl(src);
+          if (sanitizedSrc) {
+            images.push({ alt, dataUrlOrRemoteUrl: sanitizedSrc });
+            img.setAttribute('src', sanitizedSrc);
+          } else {
+            img.remove();
+          }
+        });
+      });
+
+      // Determine step title
+      let stepTitle;
+      if (stepColIdx >= 0 && cells[stepColIdx]) {
+        const stepCellText = cells[stepColIdx].textContent.trim();
+        if (/^\d+$/.test(stepCellText)) {
+          stepTitle = `Step ${stepCellText}`;
+          stepNum = parseInt(stepCellText, 10) + 1;
+        } else if (stepCellText) {
+          stepTitle = stepCellText;
+          stepNum++;
+        } else {
+          stepTitle = `Step ${stepNum++}`;
+        }
+      } else {
+        const firstSentence = mainText.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
+        stepTitle = firstSentence.length > 60 ? firstSentence.substring(0, 57) + '...' : firstSentence;
+        stepNum++;
+      }
+
+      const contentDiv = document.createElement('div');
+      contentDiv.innerHTML = bodyParts.join('\n');
+      const sanitized = this.sanitizeHtmlContent(contentDiv);
+
+      const step = { title: stepTitle, bodyHtml: sanitized.innerHTML, images };
+      lastStep = step;
+      steps.push(step);
+    }
+
+    return steps;
+  },
+
+  /**
+   * Section-aware step extraction used when no "Step N:" markers are found.
+   * Handles articles structured with:
+   * - explicit Procedure/Instructions section headings
+   * - numbered paragraphs  (1. Do this  /  1) Do this)
+   * - ordered lists         (<ol><li>…</li></ol>)
+   * - procedural tables     (Step / Action / Description columns)
+   * - chapter headings that group steps (Chapter 1, Chapter 2 …)
+   *
+   * Search priority for step boundaries:
+   *   1. Procedural tables inside the procedure section
+   *   2. Ordered lists inside the procedure section
+   *   3. Numbered paragraphs inside the procedure section
+   *
+   * @param {Element} body  - document.body element
+   * @param {Array}   nodes - Array.from(body.childNodes)
+   * @returns {Array<Object>} Steps {title, bodyHtml, images}
+   */
+  _extractSectionAwareSteps(body, nodes) {
+    const steps = [];
+
+    // Pre-scan: does the document have an explicit Procedure-section heading?
+    let hasProcedureSection = false;
+    for (const node of nodes) {
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      if (node.tagName.match(/^H[1-6]$/) && this.isProcedureSectionHeading(node.textContent.trim())) {
+        hasProcedureSection = true;
+        break;
+      }
+    }
+
+    // If there is an explicit Procedure section, start NOT collecting and wait
+    // for that heading.  If there is no such heading, collect from the start
+    // (the whole document is treated as the procedure).
+    let collecting = !hasProcedureSection;
+    let globalStepNum = 1;
+    let currentTitle = null;
+    let currentDiv   = null;
+
+    const flushCurrentStep = () => {
+      if (!currentTitle || !currentDiv) return;
+      const images = [];
+      currentDiv.querySelectorAll('img').forEach(img => {
+        const src = img.getAttribute('src') || '';
+        const alt = img.getAttribute('alt') || '';
+        const sanitizedSrc = this.sanitizeImageUrl(src);
+        if (sanitizedSrc) {
+          images.push({ alt, dataUrlOrRemoteUrl: sanitizedSrc });
+          img.setAttribute('src', sanitizedSrc);
+        } else {
+          img.remove();
+        }
+      });
+      const sanitized = this.sanitizeHtmlContent(currentDiv);
+      steps.push({ title: currentTitle, bodyHtml: sanitized.innerHTML, images });
+      currentTitle = null;
+      currentDiv   = null;
+    };
+
+    for (const node of nodes) {
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      const text = node.textContent.trim();
+
+      // ── Section heading transitions ────────────────────────────────────────
+      if (node.tagName.match(/^H[1-6]$/)) {
+        if (this.isProcedureSectionHeading(text)) {
+          flushCurrentStep();
+          collecting = true;
+          continue;
+        }
+        if (this.isSkipSectionHeading(text) || this.isTagsSectionHeading(text)) {
+          flushCurrentStep();
+          collecting = false;
+          continue;
+        }
+        if (this.isIntroSectionHeading(text)) {
+          flushCurrentStep();
+          if (hasProcedureSection) collecting = false;
+          continue;
+        }
+        // Chapter heading inside a collecting section: flush but keep collecting
+        if (collecting && /^Chapter\s+\d+/i.test(text)) {
+          flushCurrentStep();
+          continue;
+        }
+      }
+
+      if (!collecting) continue;
+
+      // ── Procedural table ───────────────────────────────────────────────────
+      if (node.tagName === 'TABLE') {
+        const tableSteps = this.extractTableSteps(node, globalStepNum);
+        if (tableSteps.length > 0) {
+          flushCurrentStep();
+          tableSteps.forEach(s => steps.push(s));
+          globalStepNum += tableSteps.length;
+          continue;
+        }
+        // Non-procedural table: keep as content inside current step (if any)
+        if (currentDiv) currentDiv.appendChild(node.cloneNode(true));
+        continue;
+      }
+
+      // ── Ordered list: each <li> becomes an individual step ─────────────────
+      if (node.tagName === 'OL') {
+        flushCurrentStep();
+        Array.from(node.querySelectorAll('li')).forEach(li => {
+          const liText = li.textContent.trim();
+          const firstSentence = liText.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
+          const liTitle = firstSentence.length > 80
+            ? firstSentence.substring(0, 77) + '...'
+            : firstSentence;
+          const liDiv = document.createElement('div');
+          liDiv.appendChild(li.cloneNode(true));
+          const liImages = [];
+          liDiv.querySelectorAll('img').forEach(img => {
+            const src = img.getAttribute('src') || '';
+            const alt = img.getAttribute('alt') || '';
+            const sanitizedSrc = this.sanitizeImageUrl(src);
+            if (sanitizedSrc) {
+              liImages.push({ alt, dataUrlOrRemoteUrl: sanitizedSrc });
+              img.setAttribute('src', sanitizedSrc);
+            } else {
+              img.remove();
+            }
+          });
+          const sanitized = this.sanitizeHtmlContent(liDiv);
+          steps.push({ title: liTitle, bodyHtml: sanitized.innerHTML, images: liImages });
+          globalStepNum++;
+        });
+        continue;
+      }
+
+      // ── Numbered paragraph: "1. xxx" or "1) xxx" ──────────────────────────
+      if (node.tagName === 'P') {
+        const numberedMatch = text.match(/^(\d+)[.)]\s+(.+)/s);
+        if (numberedMatch) {
+          flushCurrentStep();
+          const stepText = numberedMatch[2].trim();
+          const firstLine = stepText.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
+          currentTitle = firstLine.length > 80 ? firstLine.substring(0, 77) + '...' : firstLine;
+          currentDiv = document.createElement('div');
+          currentDiv.appendChild(node.cloneNode(true));
+          globalStepNum++;
+          continue;
+        }
+      }
+
+      // ── Regular content: attach to the current step if one is open ─────────
+      if (currentDiv) {
+        currentDiv.appendChild(node.cloneNode(true));
+      }
+    }
+
+    flushCurrentStep();
+    return steps;
+  },
+
+  // ─── Search index helpers ─────────────────────────────────────────────────
+
+  /**
+   * Build a pre-computed, normalised search-text string for an article.
+   * Aggregates title (double-weighted), step titles, step body text, summary,
+   * intro HTML, and tags into a single lower-cased string for fast full-text
+   * search without relying exclusively on tag matching.
+   * @param {Object} articleData - Article data object
+   * @returns {string} Normalised search text
+   */
+  buildSearchText(articleData) {
+    const parts = [];
+
+    // Title — double weight ensures strong title-match signal
+    if (articleData.title) {
+      parts.push(articleData.title);
+      parts.push(articleData.title);
+    }
+
+    // Summary / intro
+    if (articleData.summary) parts.push(articleData.summary);
+    if (articleData.introHtml) parts.push(this.stripHtmlTags(articleData.introHtml));
+
+    // Step titles and bodies
+    if (Array.isArray(articleData.steps)) {
+      articleData.steps.forEach(step => {
+        if (step.title)       parts.push(step.title);
+        if (step.bodyHtml)    parts.push(this.stripHtmlTags(step.bodyHtml));
+        if (step.chapterTitle) parts.push(step.chapterTitle);
+      });
+    }
+
+    // Tags — lowest weight, included once
+    if (Array.isArray(articleData.tags)) {
+      parts.push(articleData.tags.join(' '));
+    }
+
+    return parts
+      .join(' ')
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  },
+
+  /**
+   * Strip HTML tags and return plain text (used by buildSearchText and
+   * other helpers that need text from HTML fragments).
+   * @param {string} html
+   * @returns {string} Plain text with collapsed whitespace
+   */
+  stripHtmlTags(html) {
+    if (!html) return '';
+    return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   },
 
   /**
@@ -2261,6 +2676,8 @@ const Articles = {
           id: article.id || this.generateUUID(),
           title: article.title,
           summary: article.summary || '',
+          introHtml: article.introHtml || '',
+          relatedInfoHtml: article.relatedInfoHtml || '',
           tags: Array.isArray(article.tags) ? article.tags : [],
           estimatedMinutes: article.estimatedMinutes || null,
           steps: article.steps.map((step, index) => ({
@@ -2276,6 +2693,7 @@ const Articles = {
           createdAt: article.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
+        processedArticle.searchText = article.searchText || this.buildSearchText(processedArticle);
         
         validArticles.push(processedArticle);
       }
@@ -2440,6 +2858,8 @@ const Articles = {
           if (h2Elements.length > 0) {
             h2Elements.forEach((h2) => {
               const stepTitle = h2.textContent.trim();
+              // Skip non-procedure sections (Related Info, Change Log, tags, etc.)
+              if (this.isSkipSectionHeading(stepTitle) || this.isTagsSectionHeading(stepTitle)) return;
               const stepContent = this.getContentUntilNextHeading(h2);
               const images = [];
               stepContent.querySelectorAll('img').forEach(img => {
@@ -2489,6 +2909,8 @@ const Articles = {
           id: null,           // resolved below during upsert
           title,
           summary: raw.meta_description || raw.description || '',
+          introHtml: '',
+          relatedInfoHtml: '',
           tags: raw.kb_category
             ? [raw.kb_category]
             : (raw.topic ? [raw.topic] : []),
@@ -2501,6 +2923,7 @@ const Articles = {
           createdAt: raw.sys_created_on || syncedAt,
           updatedAt: syncedAt
         };
+        article.searchText = this.buildSearchText(article);
 
         processed.push(article);
         if (remoteId) syncedRemoteIds.add(remoteId);

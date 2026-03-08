@@ -16,14 +16,30 @@ const Search = {
   },
 
   /**
+   * Normalise text for search comparison: lowercase, collapse whitespace,
+   * strip punctuation and normalise separators (/ - _).
+   * @param {string} text
+   * @returns {string}
+   */
+  normalizeText(text) {
+    if (!text) return '';
+    return text
+      .toLowerCase()
+      .replace(/[\/\-_]+/g, ' ')   // normalise separators
+      .replace(/[^\w\s]/g, ' ')    // strip other punctuation
+      .replace(/\s+/g, ' ')
+      .trim();
+  },
+
+  /**
    * Tokenize text into searchable keywords
    * @param {string} text - Text to tokenize
    * @returns {Array<string>} Array of tokens
    */
   tokenize(text) {
     if (!text) return [];
-    return text.toLowerCase()
-      .split(/[\s\-_.,;:!?()[\]{}]+/)
+    return this.normalizeText(text)
+      .split(/\s+/)
       .filter(token => token.length > 2); // Filter out very short tokens
   },
 
@@ -78,7 +94,7 @@ const Search = {
       return [];
     }
     
-    const normalizedQuery = query.toLowerCase().trim();
+    const normalizedQuery = this.normalizeText(query);
     const queryTokens = this.tokenize(query);
     const results = [];
     
@@ -110,8 +126,17 @@ const Search = {
   },
 
   /**
-   * Calculate relevance score for an article
-   * @param {string} query - Normalized query
+   * Calculate relevance score for an article.
+   *
+   * Ranking priority (highest → lowest):
+   *   1. Exact / near title match
+   *   2. Title token matches
+   *   3. Step-title / section-heading matches
+   *   4. Procedure content matches (step bodies, summary)
+   *   5. Pre-built searchText field (covers all text, normalised)
+   *   6. Tags / keywords  (lowest weight — avoids tag-only discovery)
+   *
+   * @param {string} query - Normalised query
    * @param {Array<string>} queryTokens - Tokenized query
    * @param {Object} article - Article object
    * @returns {number} Relevance score
@@ -120,72 +145,88 @@ const Search = {
     let score = 0;
     
     if (!article) return score;
-    
-    // Title match (highest weight: 10 points base)
-    const title = (article.title || '').toLowerCase();
+
+    // ── 1. Title match (highest weight) ────────────────────────────────────
+    const title = this.normalizeText(article.title || '');
     if (title.includes(query)) {
-      score += 10;
-      if (title.startsWith(query)) {
-        score += 5; // Boost for starts-with
+      score += 15;
+      if (title.startsWith(query)) score += 5; // starts-with bonus
+    }
+
+    // Title token matches
+    if (queryTokens.length > 0) {
+      const matchedTokens = queryTokens.filter(t => title.includes(t));
+      score += matchedTokens.length * 2;
+    }
+
+    // ── 2. Pre-built searchText field ──────────────────────────────────────
+    // If the article has a pre-computed normalised searchText, use it for fast
+    // full-text matching without re-extracting all content.
+    if (article.searchText) {
+      const st = article.searchText; // already normalised
+      if (st.includes(query)) {
+        score += 3;
+      }
+      if (queryTokens.length > 1) {
+        queryTokens.forEach(token => {
+          if (st.includes(token)) score += 0.5;
+        });
       }
     }
-    
-    // Tags match (second highest: 5 points per tag)
+
+    // ── 3. Summary / intro match ───────────────────────────────────────────
+    const summary = this.normalizeText(article.summary || '');
+    if (summary.includes(query)) score += 4;
+
+    // ── 4. Step titles and body content ────────────────────────────────────
+    if (Array.isArray(article.steps)) {
+      // Pre-compute normalised step bodies once to avoid redundant processing
+      const normalisedSteps = article.steps.map(step => ({
+        title: this.normalizeText(step.title || ''),
+        body: this.normalizeText(this.stripHtml(step.bodyHtml || ''))
+      }));
+
+      normalisedSteps.forEach(({ title: stepTitle, body: stepBody }) => {
+        if (stepTitle.includes(query)) {
+          score += 5; // step-title match is high-value
+        }
+
+        if (stepBody.includes(query)) {
+          score += 2;
+          const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const occurrences = (stepBody.match(new RegExp(escaped, 'g')) || []).length;
+          score += Math.min(occurrences * 0.5, 3); // cap bonus at 3
+        }
+      });
+
+      // ── 5. Token matching across summary + steps ─────────────────────────
+      if (queryTokens.length > 1) {
+        queryTokens.forEach(token => {
+          if (summary.includes(token)) score += 0.5;
+          normalisedSteps.forEach(({ body: stepBody }) => {
+            if (stepBody.includes(token)) score += 0.3;
+          });
+        });
+      }
+    } else if (queryTokens.length > 1) {
+      // No steps — still apply summary token bonus
+      queryTokens.forEach(token => {
+        if (summary.includes(token)) score += 0.5;
+      });
+    }
+
+    // ── 6. Tags (lowest weight — should not dominate ranking) ─────────────
     if (Array.isArray(article.tags)) {
       article.tags.forEach(tag => {
-        const tagLower = tag.toLowerCase();
-        if (tagLower.includes(query)) {
-          score += 5;
+        const tagNorm = this.normalizeText(tag);
+        if (tagNorm.includes(query)) {
+          score += 1; // reduced from 5
         }
-        // Check for individual token matches in tags
         queryTokens.forEach(token => {
-          if (tagLower.includes(token)) {
-            score += 2;
+          if (tagNorm.includes(token)) {
+            score += 0.3; // reduced from 2
           }
         });
-      });
-    }
-    
-    // Summary match (third: 4 points)
-    const summary = (article.summary || '').toLowerCase();
-    if (summary.includes(query)) {
-      score += 4;
-    }
-    
-    // Step titles and content match (body: 1-2 points)
-    if (Array.isArray(article.steps)) {
-      article.steps.forEach(step => {
-        const stepTitle = (step.title || '').toLowerCase();
-        if (stepTitle.includes(query)) {
-          score += 2;
-        }
-        
-        // Strip HTML tags before searching in body content
-        const stepBody = this.stripHtml(step.bodyHtml || '').toLowerCase();
-        if (stepBody.includes(query)) {
-          score += 1;
-          // Count occurrences (escape special regex characters)
-          const occurrences = (stepBody.match(new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
-          score += Math.min(occurrences * 0.5, 3); // Cap bonus at 3
-        }
-      });
-    }
-    
-    // Tokenized query matching (additional points for multi-word queries)
-    if (queryTokens.length > 1) {
-      queryTokens.forEach(token => {
-        if (title.includes(token)) score += 1;
-        if (summary.includes(token)) score += 0.5;
-        
-        // Check step content for tokens
-        if (Array.isArray(article.steps)) {
-          article.steps.forEach(step => {
-            const stepBody = this.stripHtml(step.bodyHtml || '').toLowerCase();
-            if (stepBody.includes(token)) {
-              score += 0.3;
-            }
-          });
-        }
       });
     }
     
