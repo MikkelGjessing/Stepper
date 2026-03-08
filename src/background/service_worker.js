@@ -776,13 +776,18 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
         (steps.length > 0 ? ` | titles: ${steps.map(s => s.title).join(' | ')}` : '')
       );
 
+      const summary = raw.meta_description || raw.description || '';
+      const tags = raw.kb_category
+        ? [raw.kb_category]
+        : (raw.topic ? [raw.topic] : []);
+
       const article = {
         id: null, // resolved during upsert below
         title,
-        summary: raw.meta_description || raw.description || '',
-        tags: raw.kb_category
-          ? [raw.kb_category]
-          : (raw.topic ? [raw.topic] : []),
+        summary,
+        introHtml: '',
+        relatedInfoHtml: '',
+        tags,
         estimatedMinutes: null,
         steps,
         source: 'servicenow',
@@ -794,6 +799,7 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
         createdAt: raw.sys_created_on || syncedAt,
         updatedAt: syncedAt
       };
+      article.searchText = buildSearchTextSW(title, steps, summary, tags);
 
       processed.push(article);
       if (remoteId) syncedRemoteIds.add(remoteId);
@@ -901,8 +907,8 @@ function normalizeServiceNowHtml(html) {
 
 /**
  * Extract the "Procedure" section from a ServiceNow KB article HTML string.
- * Locates the heading that matches "2. Procedure" / "Procedure (how to)" etc. and
- * returns the HTML between that heading and the next numbered top-level section.
+ * Locates the heading that matches a Procedure/Instructions/Steps/How-to pattern
+ * and returns the HTML between that heading and the next top-level section.
  * Returns null when no Procedure heading is found.
  * @param {string} html
  * @returns {string|null}
@@ -919,10 +925,11 @@ function extractProcedureSection(html) {
     headings.push({ text, index: m.index, endIndex: m.index + m[0].length });
   }
 
-  // Find the first heading whose text mentions "procedure"
+  // Find the first heading whose text identifies a procedure section
+  const PROCEDURE_RE = /^(?:\d+\.\s*)?(?:procedure|instructions?|steps?\b|how\s+to\b|process\b|work\s+instructions?)/i;
   let procedureIdx = -1;
   for (let i = 0; i < headings.length; i++) {
-    if (/\bprocedure\b/i.test(headings[i].text)) {
+    if (PROCEDURE_RE.test(headings[i].text)) {
       procedureIdx = i;
       break;
     }
@@ -931,11 +938,12 @@ function extractProcedureSection(html) {
 
   const contentStart = headings[procedureIdx].endIndex;
 
-  // Content ends before the next top-level numbered section heading or known section names
+  // Skip-section patterns: content ends at the next section we should not include
+  const SKIP_RE = /^(?:\d+\.\s*)?(?:related\s+(?:information|articles?|links?)|change\s+(?:log|histor(?:y|ies))|revision\s+histor(?:y|ies)|appendix|keywords?|tags?)/i;
   let contentEnd = html.length;
   for (let i = procedureIdx + 1; i < headings.length; i++) {
     const t = headings[i].text;
-    if (/^\d+\.\s/.test(t) || /^(?:related|general)\s+info/i.test(t) || /^appendix/i.test(t)) {
+    if (/^\d+\.\s/.test(t) || SKIP_RE.test(t) || /^appendix/i.test(t)) {
       contentEnd = headings[i].index;
       break;
     }
@@ -1002,13 +1010,14 @@ function buildStepsFromStepMarkers(html, markers) {
 
 /**
  * Segment an HTML string into Step objects (service-worker version).
- * Mirrors the three-level fallback used by the DOM-based segmentIntoSteps() in
+ * Mirrors the multi-level fallback used by the DOM-based segmentIntoSteps() in
  * articles.js so that ServiceNow articles are processed the same way as uploads:
  *   1. Normalize ServiceNow noise
  *   2. Focus on the Procedure section (if present)
  *   3. "Step N:" marker segmentation
- *   4. H2-based segmentation fallback
- *   5. Single-step fallback
+ *   4. Numbered paragraph / OL list item segmentation
+ *   5. H2-based segmentation fallback (skipping skip-sections)
+ *   6. Single-step fallback
  * @param {string} html
  * @param {string} articleTitle
  * @returns {Array<{index:number,title:string,bodyHtml:string,images:Array}>}
@@ -1030,14 +1039,73 @@ function segmentHtmlIntoSteps(html, articleTitle) {
     return buildStepsFromStepMarkers(procedureHtml, stepMarkers);
   }
 
-  // Step 4: H2-based fallback
-  const h2Matches = [...procedureHtml.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/gi)];
-  if (h2Matches.length > 0) {
-    return buildStepsFromH2(procedureHtml, h2Matches);
+  // Step 4: Numbered paragraph / OL list segmentation
+  const numberedSteps = buildStepsFromNumberedList(procedureHtml);
+  if (numberedSteps.length > 0) {
+    return numberedSteps;
   }
 
-  // Step 5: Single-step fallback
+  // Step 5: H2-based fallback — skip non-procedure section headings
+  const SKIP_RE = /^(?:\d+\.\s*)?(?:related\s+(?:information|articles?|links?)|change\s+(?:log|histor(?:y|ies))|revision\s+histor(?:y|ies)|appendix|keywords?|tags?)/i;
+  const h2Matches = [...procedureHtml.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/gi)];
+  const filteredH2 = h2Matches.filter(m => !SKIP_RE.test(htmlToPlainText(m[1]).trim()));
+  if (filteredH2.length > 0) {
+    return buildStepsFromH2(procedureHtml, filteredH2);
+  }
+
+  // Step 6: Single-step fallback
   return [{ index: 1, title: articleTitle || 'Procedure', bodyHtml: procedureHtml, images: [] }];
+}
+
+/**
+ * Build steps from numbered paragraphs ("1. xxx", "1) xxx") or OL list items.
+ * Only used when no "Step N:" markers are found.
+ * @param {string} html
+ * @returns {Array<{index:number,title:string,bodyHtml:string,images:Array}>}
+ */
+function buildStepsFromNumberedList(html) {
+  const steps = [];
+
+  // Try OL list items first (<ol><li>...</li></ol>)
+  const olMatch = html.match(/<ol[^>]*>([\s\S]*?)<\/ol>/i);
+  if (olMatch) {
+    const liRe = /<li[^>]*>([\s\S]*?)<\/li>/gi;
+    let liM;
+    let idx = 1;
+    while ((liM = liRe.exec(olMatch[1])) !== null) {
+      const text = htmlToPlainText(liM[1]).trim();
+      if (!text) continue;
+      const firstSentence = text.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
+      const stepTitle = firstSentence.length > 80 ? firstSentence.substring(0, 77) + '...' : firstSentence;
+      steps.push({ index: idx++, title: stepTitle, bodyHtml: `<p>${liM[1]}</p>`, images: [] });
+    }
+    if (steps.length > 0) return steps;
+  }
+
+  // Try numbered paragraphs: <p>1. xxx</p> or <p>1) xxx</p>
+  const blockRe = /<(h[1-6]|p)(?:\s[^>]*)?>[\s\S]*?<\/\1>/gi;
+  const numberedRe = /^(\d+)[.)]\s+(.+)$/i;
+  let bm;
+  let currentStep = null;
+  let idx = 1;
+
+  while ((bm = blockRe.exec(html)) !== null) {
+    const text = htmlToPlainText(bm[0]).trim();
+    const numMatch = text.match(numberedRe);
+    if (numMatch) {
+      if (currentStep) steps.push(currentStep);
+      const stepText = numMatch[2].trim();
+      const firstSentence = stepText.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
+      const stepTitle = firstSentence.length > 80 ? firstSentence.substring(0, 77) + '...' : firstSentence;
+      currentStep = { index: idx++, title: stepTitle, bodyHtml: bm[0], images: [] };
+    } else if (currentStep) {
+      // Append continuation content to current step
+      currentStep.bodyHtml += bm[0];
+    }
+  }
+  if (currentStep) steps.push(currentStep);
+
+  return steps;
 }
 
 function buildStepsFromH2(html, matches) {
@@ -1055,6 +1123,43 @@ function buildStepsFromH2(html, matches) {
     });
   }
   return steps;
+}
+
+/**
+ * Build a pre-computed, normalised search-text string for a ServiceNow article.
+ * Mirrors Articles.buildSearchText() from articles.js for the service-worker context.
+ * @param {string} title
+ * @param {Array<{title:string,bodyHtml:string}>} steps
+ * @param {string} summary
+ * @param {Array<string>} tags
+ * @returns {string}
+ */
+function buildSearchTextSW(title, steps, summary, tags) {
+  const parts = [];
+
+  // Title — double weight
+  if (title) { parts.push(title); parts.push(title); }
+
+  // Summary
+  if (summary) parts.push(summary);
+
+  // Steps
+  if (Array.isArray(steps)) {
+    steps.forEach(step => {
+      if (step.title) parts.push(step.title);
+      if (step.bodyHtml) parts.push(step.bodyHtml.replace(/<[^>]*>/g, ' '));
+    });
+  }
+
+  // Tags (lowest weight)
+  if (Array.isArray(tags)) parts.push(tags.join(' '));
+
+  return parts
+    .join(' ')
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 
