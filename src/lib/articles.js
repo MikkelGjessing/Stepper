@@ -2468,6 +2468,9 @@ const Articles = {
   _extractSectionAwareSteps(body, nodes) {
     const steps = [];
 
+    /** Maximum characters for a step title extracted from body content. */
+    const MAX_STEP_TITLE_LENGTH = 80;
+
     // Pre-scan: does the document have an explicit Procedure-section heading?
     let hasProcedureSection = false;
     for (const node of nodes) {
@@ -2499,7 +2502,7 @@ const Articles = {
         }
         if (firstEl) {
           const firstText = firstEl.textContent.trim();
-          if (firstText && firstText.length <= 80) {
+          if (firstText && firstText.length <= MAX_STEP_TITLE_LENGTH) {
             currentTitle = firstText;
             firstEl.remove();
           }
