@@ -66,7 +66,13 @@ const Search = {
    * @returns {Object} Search index object
    */
   buildSearchIndex(article) {
-    const stripHtml = (html) => (html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    // ArticleNormalizer (normalizer.js) is always loaded before search.js in both
+    // popup.html and options.html.  The inline fallback handles edge-cases such as
+    // unit-test environments where normalizer.js is not present.
+    const stripHtml = (typeof ArticleNormalizer !== 'undefined' && ArticleNormalizer.stripHtmlTags)
+      ? (html) => ArticleNormalizer.stripHtmlTags(html)
+      /* istanbul ignore next */
+      : (html) => (html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     const norm = (text)    => this.normalizeText(text || '');
     const tok  = (text)    => this.tokenize(text || '');
 

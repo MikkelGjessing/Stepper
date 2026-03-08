@@ -27,7 +27,27 @@
 
 const MIN_SCORE_THRESHOLD = 10;
 
+/** Maximum length for step titles extracted from text content. */
+const MAX_TITLE_LENGTH = 80;
+/** Length to truncate to (accounts for "..." suffix). */
+const TRUNCATED_TITLE_LENGTH = MAX_TITLE_LENGTH - 3;
+
 // ─── Shared internal helpers ──────────────────────────────────────────────────
+
+/**
+ * Extract a suitable step title from a plain-text string.
+ * Takes the first sentence (split on .,!,?) and truncates to MAX_TITLE_LENGTH.
+ * @param {string} text - Plain text
+ * @returns {string}
+ */
+function _extractTitleFromText(text) {
+  const firstSentence = (text || '').replace(/\s+/g, ' ')
+    .split(/[.!?](?:\s|$)/)[0].trim();
+  return firstSentence.length > MAX_TITLE_LENGTH
+    ? firstSentence.substring(0, TRUNCATED_TITLE_LENGTH) + '...'
+    : firstSentence;
+}
+
 
 /**
  * Create a temporary DIV element populated with the given HTML string.
@@ -238,10 +258,7 @@ const chapteredProcedureParser = {
             const liDiv = document.createElement('div');
             liDiv.appendChild(li.cloneNode(true));
             const liText = li.textContent.trim();
-            const firstSentence = liText.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
-            const title = firstSentence.length > 80
-              ? firstSentence.substring(0, 77) + '...'
-              : firstSentence;
+            const title = _extractTitleFromText(liText);
             const step = _buildStep(title, liDiv);
             if (chapterTitle) step.chapterTitle = chapterTitle;
             steps.push(step);
@@ -261,8 +278,7 @@ const chapteredProcedureParser = {
           if (!numMatch) return;
           foundNumbered = true;
           const stepText = numMatch[2].trim();
-          const firstLine = stepText.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
-          const title = firstLine.length > 80 ? firstLine.substring(0, 77) + '...' : firstLine;
+          const title = _extractTitleFromText(stepText);
           const el = document.createElement('div');
           el.appendChild(node.cloneNode(true));
           const step = _buildStep(title, el);
@@ -437,8 +453,7 @@ const explicitStepHeadingParser = {
         const numMatch = text.match(/^(\d+)[.)]\s+(.+)/s);
         if (!numMatch) continue;
         const stepText = numMatch[2].trim();
-        const firstLine = stepText.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
-        const title = firstLine.length > 80 ? firstLine.substring(0, 77) + '...' : firstLine;
+        const title = _extractTitleFromText(stepText);
         const el = document.createElement('div');
         el.appendChild(node.cloneNode(true));
         steps.push(_buildStep(title, el));
@@ -515,11 +530,7 @@ const numberedListProcedureParser = {
           const liDiv = document.createElement('div');
           liDiv.appendChild(li.cloneNode(true));
           const liText = li.textContent.trim();
-          const firstSentence = liText.replace(/\s+/g, ' ')
-            .split(/[.!?](?:\s|$)/)[0].trim();
-          const title = firstSentence.length > 80
-            ? firstSentence.substring(0, 77) + '...'
-            : firstSentence;
+          const title = _extractTitleFromText(liText);
           steps.push(_buildStep(title, liDiv));
           globalIdx++;
         });
@@ -535,11 +546,7 @@ const numberedListProcedureParser = {
         const numMatch = text.match(/^(\d+)[.)]\s+(.+)/s);
         if (!numMatch) continue;
         const stepText = numMatch[2].trim();
-        const firstLine = stepText.replace(/\s+/g, ' ')
-          .split(/[.!?](?:\s|$)/)[0].trim();
-        const title = firstLine.length > 80
-          ? firstLine.substring(0, 77) + '...'
-          : firstLine;
+        const title = _extractTitleFromText(stepText);
         const el = document.createElement('div');
         el.appendChild(node.cloneNode(true));
         steps.push(_buildStep(title, el));

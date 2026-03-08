@@ -291,9 +291,9 @@ const ArticleNormalizer = {
         // within the current section so that sub-headings like "Chapter 1"
         // remain inside their parent Procedure section.
         const isMajorHeading    = /^H[1-2]$/.test(node.tagName);
-        const isRecognisedType  = headingType !== 'generic';
+        const isRecognizedType  = headingType !== 'generic';
 
-        if (isMajorHeading || isRecognisedType) {
+        if (isMajorHeading || isRecognizedType) {
           if (currentSection) sections.push(currentSection);
           currentSection = {
             heading: headingText,
