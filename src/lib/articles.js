@@ -1,7 +1,13 @@
 /**
  * Article CRUD operations and parsing
  * Manages article data structure and operations
- * 
+ *
+ * Depends on:
+ *   ArticleNormalizer  (normalizer.js   – loaded before this file)
+ *   Ingestion          (ingestion.js    – loaded after this file; only
+ *                        referenced inside method bodies, not at load time)
+ *   ParserRegistry     (parser_strategies.js – same lazy-reference rule)
+ *
  * Article Schema:
  * {
  *   id: string (UUID),
@@ -13,11 +19,23 @@
  *   tags: string[],
  *   estimatedMinutes: number (optional),
  *   steps: Step[],
+ *   parserMeta: {              ← added by the parser-strategy pipeline
+ *     parserName:            string,
+ *     parserScore:           number,
+ *     stepCount:             number,
+ *     sectionHeadings:       string[],
+ *     procedureSectionFound: boolean,
+ *     hasNotes:              boolean,
+ *     hasImages:             boolean,
+ *     hasTables:             boolean,
+ *     parsingWarnings:       string[],
+ *     selectionReasons:      string[]
+ *   },
  *   source: "dummy" | "uploaded" | "repo" | "servicenow",
  *   createdAt: string (ISO),
  *   updatedAt: string (ISO)
  * }
- * 
+ *
  * Step Schema:
  * {
  *   index: number,
@@ -1176,8 +1194,8 @@ const Articles = {
   },
 
   /**
-   * Parse Markdown article
-   * Conventions: First line # Title, ## Step: ... creates steps
+   * Parse Markdown article using the ingestion pipeline.
+   * Conventions: First line # Title; the parser-strategy pipeline handles step extraction.
    * @param {string} content - Markdown content
    * @param {string} fallbackTitle - Fallback title if parsing fails
    * @returns {Object} Result with ok status and article or error details
@@ -1198,84 +1216,41 @@ const Articles = {
         bodyLines = lines;
       }
 
-      // Convert body to HTML and parse into DOM for step segmentation
+      // Convert body to HTML and parse into DOM for the ingestion pipeline
       const bodyHtml = this.markdownToHtml(bodyLines.join('\n'));
       const parser = new DOMParser();
       const doc = parser.parseFromString(bodyHtml, 'text/html');
 
-      // Extract summary from first paragraph
+      // Run the shared ingestion pipeline (normalise → strategy-select → parse)
+      const { steps, parserMeta, normalizedArticle } = Ingestion.ingest(doc, 'uploaded', title);
+
+      // Derive summary: prefer intro section text, fall back to first paragraph
       let summary = '';
-      const firstP = doc.querySelector('p');
-      if (firstP) {
-        summary = firstP.textContent.trim();
+      if (normalizedArticle.introHtml) {
+        summary = this.stripHtmlTags(normalizedArticle.introHtml).substring(0, 300).trim();
       }
-
-      // Try ServiceNow-style "Step N:" segmentation first
-      let steps = this.segmentIntoSteps(doc);
-
-      // Fallback 1: Use <h2> headings as step boundaries
-      if (steps.length === 0) {
-        const h2Elements = doc.querySelectorAll('h2');
-        if (h2Elements.length > 0) {
-          h2Elements.forEach(h2 => {
-            // Strip "Step: " prefix for compatibility with legacy "## Step: Title" convention
-            const stepTitle = h2.textContent.trim().replace(/^Step:\s*/i, '');
-            // Skip non-procedure sections (Related Info, Change Log, etc.)
-            if (this.isSkipSectionHeading(stepTitle) || this.isTagsSectionHeading(stepTitle)) return;
-            const stepContent = this.getContentUntilNextHeading(h2);
-            const images = [];
-            const imgElements = stepContent.querySelectorAll('img');
-            imgElements.forEach(img => {
-              const src = img.getAttribute('src') || '';
-              const alt = img.getAttribute('alt') || '';
-              const sanitizedSrc = this.sanitizeImageUrl(src);
-              if (sanitizedSrc) {
-                images.push({ alt, dataUrlOrRemoteUrl: sanitizedSrc });
-                img.setAttribute('src', sanitizedSrc);
-              } else {
-                img.remove();
-              }
-            });
-            const sanitized = this.sanitizeHtmlContent(stepContent);
-            steps.push({ title: stepTitle, bodyHtml: sanitized.innerHTML, images });
-          });
-        }
+      if (!summary) {
+        const firstP = doc.querySelector('p');
+        if (firstP) summary = firstP.textContent.trim();
       }
-
-      // Fallback 2: No steps found, create a single-step article
-      if (steps.length === 0) {
-        steps.push({
-          title: 'Procedure',
-          bodyHtml: bodyHtml,
-          images: []
-        });
-      }
-
-      // Add index to all steps
-      const indexedSteps = steps.map((step, index) => ({
-        index: index + 1,
-        ...step
-      }));
 
       const articleData = {
         id: this.generateUUID(),
-        title: title,
-        summary: summary,
-        introHtml: '',
-        relatedInfoHtml: '',
-        tags: [],
+        title,
+        summary,
+        introHtml:       normalizedArticle.introHtml       || '',
+        relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
+        tags:            normalizedArticle.tags.length > 0  ? normalizedArticle.tags : [],
         estimatedMinutes: null,
-        steps: indexedSteps,
+        steps,
+        parserMeta,
         source: 'uploaded',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
       articleData.searchText = this.buildSearchText(articleData);
 
-      return {
-        ok: true,
-        article: articleData
-      };
+      return { ok: true, article: articleData };
     } catch (error) {
       console.error('Error parsing Markdown article:', error);
       return {
@@ -1346,8 +1321,8 @@ const Articles = {
   },
 
   /**
-   * Parse HTML article
-   * Conventions: <h1> as title, <h2> sections as steps
+   * Parse HTML article using the ingestion pipeline.
+   * Conventions: <h1> as title; the parser-strategy pipeline handles step extraction.
    * @param {string} content - HTML content
    * @param {string} fallbackTitle - Fallback title if parsing fails
    * @returns {Object} Result with ok status and article or error details
@@ -1365,118 +1340,42 @@ const Articles = {
       if (h1) {
         h1.remove();
       }
-      
-      // Get summary from first paragraph before first h2
+
+      // Run the shared ingestion pipeline (normalise → strategy-select → parse)
+      const { steps, parserMeta, normalizedArticle } = Ingestion.ingest(doc, 'uploaded', title);
+
+      // Derive summary: prefer intro section text, fall back to first paragraph
       let summary = '';
-      const firstP = doc.querySelector('p');
-      if (firstP) {
-        const firstH2 = doc.querySelector('h2');
-        if (!firstH2 || this.isBefore(firstP, firstH2)) {
-          summary = firstP.textContent.trim();
-        }
+      if (normalizedArticle.introHtml) {
+        summary = this.stripHtmlTags(normalizedArticle.introHtml).substring(0, 300).trim();
       }
-      
-      // Try new ServiceNow-style segmentation first
-      let steps = this.segmentIntoSteps(doc);
-      
-      // Fallback 1: If no "Step N:" markers, try <h2> sections
-      if (steps.length === 0) {
-        const h2Elements = doc.querySelectorAll('h2');
-        
-        if (h2Elements.length > 0) {
-          h2Elements.forEach((h2, index) => {
-            const stepTitle = h2.textContent.trim();
-            // Skip non-procedure sections (Related Info, Change Log, tags, etc.)
-            if (this.isSkipSectionHeading(stepTitle) || this.isTagsSectionHeading(stepTitle)) return;
-            const stepContent = this.getContentUntilNextHeading(h2);
-            
-            // Extract and sanitize images from step content
-            const images = [];
-            const imgElements = stepContent.querySelectorAll('img');
-            imgElements.forEach(img => {
-              const src = img.getAttribute('src') || '';
-              const alt = img.getAttribute('alt') || '';
-              const sanitizedSrc = this.sanitizeImageUrl(src);
-              if (sanitizedSrc) {
-                images.push({
-                  alt: alt,
-                  dataUrlOrRemoteUrl: sanitizedSrc
-                });
-                img.setAttribute('src', sanitizedSrc);
-              } else {
-                img.remove();
-              }
-            });
-            
-            // Sanitize the HTML content
-            const sanitizedContent = this.sanitizeHtmlContent(stepContent);
-            
-            steps.push({
-              title: stepTitle,
-              bodyHtml: sanitizedContent.innerHTML,
-              images: images
-            });
-          });
-        }
-      }
-      
-      // Fallback 2: No steps found, create single-step using body content
-      if (steps.length === 0) {
-        const bodyContent = doc.body.cloneNode(true);
-        
-        // Extract images
-        const images = [];
-        const imgElements = bodyContent.querySelectorAll('img');
-        imgElements.forEach(img => {
-          const src = img.getAttribute('src') || '';
-          const alt = img.getAttribute('alt') || '';
-          const sanitizedSrc = this.sanitizeImageUrl(src);
-          if (sanitizedSrc) {
-            images.push({
-              alt: alt,
-              dataUrlOrRemoteUrl: sanitizedSrc
-            });
-            img.setAttribute('src', sanitizedSrc);
-          } else {
-            img.remove();
+      if (!summary) {
+        const firstP = doc.querySelector('p');
+        if (firstP) {
+          const firstH2 = doc.querySelector('h2');
+          if (!firstH2 || this.isBefore(firstP, firstH2)) {
+            summary = firstP.textContent.trim();
           }
-        });
-        
-        // Sanitize content
-        const sanitizedContent = this.sanitizeHtmlContent(bodyContent);
-        
-        steps.push({
-          title: 'Procedure',
-          bodyHtml: sanitizedContent.innerHTML,
-          images: images
-        });
+        }
       }
-      
-      // Add index to all steps
-      steps = steps.map((step, index) => ({
-        index: index + 1,
-        ...step
-      }));
 
       const articleData = {
         id: this.generateUUID(),
-        title: title,
-        summary: summary,
-        introHtml: '',
-        relatedInfoHtml: '',
-        tags: [],
+        title,
+        summary,
+        introHtml:       normalizedArticle.introHtml       || '',
+        relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
+        tags:            normalizedArticle.tags.length > 0  ? normalizedArticle.tags : [],
         estimatedMinutes: null,
-        steps: steps,
+        steps,
+        parserMeta,
         source: 'uploaded',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
       articleData.searchText = this.buildSearchText(articleData);
 
-      return {
-        ok: true,
-        article: articleData
-      };
+      return { ok: true, article: articleData };
     } catch (error) {
       console.error('Error parsing HTML article:', error);
       return {
@@ -1572,119 +1471,41 @@ const Articles = {
         }
       }
 
-      // Get summary from first remaining paragraph (after title extraction, if no h2 before it)
+      // Run the shared ingestion pipeline (normalise → strategy-select → parse)
+      const { steps, parserMeta, normalizedArticle } = Ingestion.ingest(doc, 'uploaded', title);
+
+      // Derive summary: prefer intro section text, fall back to first paragraph
       let summary = '';
-      const summaryParagraph = doc.querySelector('p');
-      if (summaryParagraph) {
-        const firstH2 = doc.querySelector('h2');
-        if (!firstH2 || this.isBefore(summaryParagraph, firstH2)) {
-          summary = summaryParagraph.textContent.trim();
-        }
+      if (normalizedArticle.introHtml) {
+        summary = this.stripHtmlTags(normalizedArticle.introHtml).substring(0, 300).trim();
       }
-
-      // Try new ServiceNow-style segmentation first
-      let steps = this.segmentIntoSteps(doc);
-      
-      // Fallback 1: If no "Step N:" markers, try <h2> sections
-      if (steps.length === 0) {
-        const h2Elements = doc.querySelectorAll('h2');
-        
-        if (h2Elements.length > 0) {
-          // Multiple steps based on h2 headings
-          h2Elements.forEach((h2, index) => {
-            const stepTitle = h2.textContent.trim();
-            // Skip non-procedure sections (Related Info, Change Log, tags, etc.)
-            if (this.isSkipSectionHeading(stepTitle) || this.isTagsSectionHeading(stepTitle)) return;
-            const stepContent = this.getContentUntilNextHeading(h2);
-
-            // Extract images from step content
-            const images = [];
-            const imgElements = stepContent.querySelectorAll('img');
-            imgElements.forEach(img => {
-              const src = img.getAttribute('src') || '';
-              const alt = img.getAttribute('alt') || '';
-              const sanitizedSrc = this.sanitizeImageUrl(src);
-              if (sanitizedSrc) {
-                images.push({
-                  alt: alt,
-                  dataUrlOrRemoteUrl: sanitizedSrc
-                });
-                img.setAttribute('src', sanitizedSrc);
-              } else {
-                img.remove();
-              }
-            });
-
-            // Sanitize the HTML content
-            const sanitizedContent = this.sanitizeHtmlContent(stepContent);
-
-            steps.push({
-              title: stepTitle,
-              bodyHtml: sanitizedContent.innerHTML,
-              images: images
-            });
-          });
-        }
-      }
-      
-      // Fallback 2: No steps found, create single-step using body content
-      if (steps.length === 0) {
-        // Get all remaining content
-        const bodyContent = doc.body.cloneNode(true);
-        
-        // Extract images
-        const images = [];
-        const imgElements = bodyContent.querySelectorAll('img');
-        imgElements.forEach(img => {
-          const src = img.getAttribute('src') || '';
-          const alt = img.getAttribute('alt') || '';
-          const sanitizedSrc = this.sanitizeImageUrl(src);
-          if (sanitizedSrc) {
-            images.push({
-              alt: alt,
-              dataUrlOrRemoteUrl: sanitizedSrc
-            });
-            img.setAttribute('src', sanitizedSrc);
-          } else {
-            img.remove();
+      if (!summary) {
+        const summaryParagraph = doc.querySelector('p');
+        if (summaryParagraph) {
+          const firstH2 = doc.querySelector('h2');
+          if (!firstH2 || this.isBefore(summaryParagraph, firstH2)) {
+            summary = summaryParagraph.textContent.trim();
           }
-        });
-
-        // Sanitize content
-        const sanitizedContent = this.sanitizeHtmlContent(bodyContent);
-
-        steps.push({
-          title: 'Procedure',
-          bodyHtml: sanitizedContent.innerHTML,
-          images: images
-        });
+        }
       }
-      
-      // Add index to all steps
-      steps = steps.map((step, index) => ({
-        index: index + 1,
-        ...step
-      }));
 
       const articleData = {
         id: this.generateUUID(),
-        title: title,
-        summary: summary,
-        introHtml: '',
-        relatedInfoHtml: '',
-        tags: [],
+        title,
+        summary,
+        introHtml:       normalizedArticle.introHtml       || '',
+        relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
+        tags:            normalizedArticle.tags.length > 0  ? normalizedArticle.tags : [],
         estimatedMinutes: null,
-        steps: steps,
+        steps,
+        parserMeta,
         source: 'uploaded',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
       articleData.searchText = this.buildSearchText(articleData);
 
-      return {
-        ok: true,
-        article: articleData
-      };
+      return { ok: true, article: articleData };
     } catch (error) {
       console.error('Error parsing DOCX article:', error);
       return {
@@ -1698,107 +1519,22 @@ const Articles = {
 
   /**
    * Normalize a ServiceNow article Document by removing UI chrome and noise.
-   * Operates in-place on the parsed DOM so the caller can then use segmentIntoSteps().
-   *
-   * Removes:
-   *  - "Leave a comment" prompts
-   *  - "Copy Permalink" links/buttons
-   *  - "Top of Form" / "Bottom of Form" markers
-   *  - All <form>, <input>, <button>, <textarea>, <select> elements
-   *  - <script>, <style>, <iframe>, <object>, <embed> tags
-   *  - Non-breaking spaces converted to regular spaces (via text-node walk)
-   *
+   * Delegates to ArticleNormalizer.normalizeServiceNowDoc() (canonical impl in normalizer.js).
    * @param {Document} doc - Parsed HTML document (mutated in-place)
    * @returns {Document} The same document, normalised
    */
   normalizeServiceNowDoc(doc) {
-    // Remove dangerous / irrelevant structural tags
-    doc.querySelectorAll(
-      'script, style, iframe, object, embed, form, input, button, textarea, select'
-    ).forEach(el => el.remove());
-
-    // ServiceNow UI-noise patterns (matched against trimmed textContent of leaf/inline elements)
-    const SN_NOISE = [
-      /^leave\s+a\s+comment/i,
-      /^copy\s+permalink$/i,
-      /^top\s+of\s+form$/i,
-      /^bottom\s+of\s+form$/i
-    ];
-
-    // Walk all block and inline elements; remove those whose full text matches a noise pattern.
-    // We query broad selectors and use closest() to avoid removing a parent that has real children.
-    doc.querySelectorAll('p, div, span, a, li, td, th').forEach(el => {
-      const text = el.textContent.trim();
-      if (text && SN_NOISE.some(pattern => pattern.test(text))) {
-        el.remove();
-      }
-    });
-
-    // Replace non-breaking spaces with regular spaces in all text nodes
-    const walker = doc.createTreeWalker(doc.body || doc.documentElement, NodeFilter.SHOW_TEXT);
-    let textNode;
-    while ((textNode = walker.nextNode())) {
-      if (textNode.nodeValue.includes('\u00a0')) {
-        textNode.nodeValue = textNode.nodeValue.replace(/\u00a0/g, ' ');
-      }
-    }
-
-    return doc;
+    return ArticleNormalizer.normalizeServiceNowDoc(doc);
   },
 
   /**
-   * Sanitize HTML content to remove dangerous elements and attributes
+   * Sanitize HTML content to remove dangerous elements and attributes.
+   * Delegates to ArticleNormalizer.sanitizeHtmlContent() (canonical impl in normalizer.js).
    * @param {Element} element - DOM element to sanitize
    * @returns {Element} Sanitized element
    */
   sanitizeHtmlContent(element) {
-    // Remove dangerous tags: script, iframe, object, embed
-    element.querySelectorAll('script, iframe, object, embed').forEach(el => el.remove());
-    
-    // Convert h1 to h3 and h2 to h4 in step content to avoid nesting issues
-    // while preserving document hierarchy for accessibility
-    element.querySelectorAll('h1').forEach(el => {
-      const h3 = document.createElement('h3');
-      // Use textContent to avoid innerHTML security issues during sanitization
-      h3.textContent = el.textContent;
-      Array.from(el.attributes).forEach(attr => {
-        // Don't copy dangerous attributes
-        if (!attr.name.startsWith('on') && attr.name !== 'href' && attr.name !== 'src') {
-          h3.setAttribute(attr.name, attr.value);
-        }
-      });
-      el.parentNode.replaceChild(h3, el);
-    });
-    
-    element.querySelectorAll('h2').forEach(el => {
-      const h4 = document.createElement('h4');
-      // Use textContent to avoid innerHTML security issues during sanitization
-      h4.textContent = el.textContent;
-      Array.from(el.attributes).forEach(attr => {
-        // Don't copy dangerous attributes
-        if (!attr.name.startsWith('on') && attr.name !== 'href' && attr.name !== 'src') {
-          h4.setAttribute(attr.name, attr.value);
-        }
-      });
-      el.parentNode.replaceChild(h4, el);
-    });
-    
-    // Remove event handler attributes and dangerous URLs
-    element.querySelectorAll('*').forEach(el => {
-      Array.from(el.attributes).forEach(attr => {
-        // Remove event handlers
-        if (attr.name.startsWith('on')) {
-          el.removeAttribute(attr.name);
-        }
-        // Remove javascript: URLs
-        if ((attr.name === 'href' || attr.name === 'src') && 
-            attr.value.toLowerCase().includes('javascript:')) {
-          el.removeAttribute(attr.name);
-        }
-      });
-    });
-    
-    return element;
+    return ArticleNormalizer.sanitizeHtmlContent(element);
   },
 
   /**
@@ -1813,19 +1549,13 @@ const Articles = {
   },
 
   /**
-   * Validate and sanitize image URL
+   * Validate and sanitize image URL.
+   * Delegates to ArticleNormalizer.sanitizeImageUrl() (canonical impl in normalizer.js).
    * @param {string} url - Image URL
    * @returns {string|null} Sanitized URL or null if invalid
    */
   sanitizeImageUrl(url) {
-    // Only allow data URLs with image MIME types, http, and https
-    if (url.startsWith('data:image/')) {
-      return url;
-    }
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      return url;
-    }
-    return null;
+    return ArticleNormalizer.sanitizeImageUrl(url);
   },
 
   /**
@@ -2183,6 +1913,10 @@ const Articles = {
   // These detect recurring structural traits common across large KB collections
   // so that parsers can decide which sections produce steps, which are intro
   // content, and which should be ignored entirely.
+  //
+  // The canonical implementations live in ArticleNormalizer (normalizer.js).
+  // These methods are kept here as convenience delegates for backward
+  // compatibility with any code that calls this.isSkipSectionHeading() etc.
 
   /**
    * Return true when the heading text identifies a section that must NOT
@@ -2192,7 +1926,7 @@ const Articles = {
    * @returns {boolean}
    */
   isSkipSectionHeading(text) {
-    return /^(?:\d+\.\s*)?(?:related\s+(?:information|articles?|links?)|change\s+(?:log|histor(?:y|ies))|revision\s+histor(?:y|ies)|appendix)/i.test(text.trim());
+    return ArticleNormalizer.isSkipSectionHeading(text);
   },
 
   /**
@@ -2201,7 +1935,7 @@ const Articles = {
    * @returns {boolean}
    */
   isProcedureSectionHeading(text) {
-    return /^(?:\d+\.\s*)?(?:procedure|instructions?|steps?\b|how\s+to\b|process\b|work\s+instructions?)/i.test(text.trim());
+    return ArticleNormalizer.isProcedureSectionHeading(text);
   },
 
   /**
@@ -2210,7 +1944,7 @@ const Articles = {
    * @returns {boolean}
    */
   isIntroSectionHeading(text) {
-    return /^(?:\d+\.\s*)?(?:general\s+info(?:rmation)?|overview\b|introduction\b|summary\b|background\b)/i.test(text.trim());
+    return ArticleNormalizer.isIntroSectionHeading(text);
   },
 
   /**
@@ -2219,7 +1953,7 @@ const Articles = {
    * @returns {boolean}
    */
   isTagsSectionHeading(text) {
-    return /^(?:keywords?|tags?)(?:\s*[:\-]|\s*$)/i.test(text.trim());
+    return ArticleNormalizer.isTagsSectionHeading(text);
   },
 
   // ─── Universal step extraction helpers ───────────────────────────────────
@@ -2548,14 +2282,13 @@ const Articles = {
   },
 
   /**
-   * Strip HTML tags and return plain text (used by buildSearchText and
-   * other helpers that need text from HTML fragments).
+   * Strip HTML tags and return plain text.
+   * Delegates to ArticleNormalizer.stripHtmlTags() (canonical impl in normalizer.js).
    * @param {string} html
    * @returns {string} Plain text with collapsed whitespace
    */
   stripHtmlTags(html) {
-    if (!html) return '';
-    return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    return ArticleNormalizer.stripHtmlTags(html);
   },
 
   /**
@@ -2811,8 +2544,8 @@ const Articles = {
    * Import/upsert ServiceNow Knowledge articles into local storage.
    *
    * Each raw ServiceNow article is mapped into the extension Article schema
-   * and run through segmentIntoSteps() so it gets the same step-by-step
-   * format as HTML/DOCX imports.
+   * and run through the shared ingestion pipeline so it gets the same
+   * step-by-step format as HTML/DOCX imports.
    *
    * Storage rules
    * • Upsert by remoteId (sys_id or kb_number) – repeated syncs update.
@@ -2841,81 +2574,37 @@ const Articles = {
           raw.text_html || raw.wiki || raw.text ||
           raw.description || raw.body || raw.content || '';
 
-        // Parse into a DOM Document so we can use the same shared pipeline as
-        // uploaded HTML/DOCX articles (segmentIntoSteps expects a Document).
+        // Parse into a DOM Document and run the shared ingestion pipeline.
+        // Pass normalizeServiceNowDoc as the source-specific cleanup callback.
         const parser = new DOMParser();
         const doc = parser.parseFromString(rawHtml || '', 'text/html');
 
-        // Normalize: strip ServiceNow UI chrome and noise
-        this.normalizeServiceNowDoc(doc);
+        const { steps, parserMeta, normalizedArticle } = Ingestion.ingest(
+          doc,
+          'servicenow',
+          title,
+          (d) => this.normalizeServiceNowDoc(d)
+        );
 
-        // Segment using the shared DOM-based pipeline
-        let steps = this.segmentIntoSteps(doc);
-
-        // Fallback: h2-based segmentation (reuses parseHtmlArticle logic)
-        if (steps.length === 0) {
-          const h2Elements = doc.querySelectorAll('h2');
-          if (h2Elements.length > 0) {
-            h2Elements.forEach((h2) => {
-              const stepTitle = h2.textContent.trim();
-              // Skip non-procedure sections (Related Info, Change Log, tags, etc.)
-              if (this.isSkipSectionHeading(stepTitle) || this.isTagsSectionHeading(stepTitle)) return;
-              const stepContent = this.getContentUntilNextHeading(h2);
-              const images = [];
-              stepContent.querySelectorAll('img').forEach(img => {
-                const src = img.getAttribute('src') || '';
-                const alt = img.getAttribute('alt') || '';
-                const sanitizedSrc = this.sanitizeImageUrl(src);
-                if (sanitizedSrc) {
-                  images.push({ alt, dataUrlOrRemoteUrl: sanitizedSrc });
-                  img.setAttribute('src', sanitizedSrc);
-                } else {
-                  img.remove();
-                }
-              });
-              const sanitizedContent = this.sanitizeHtmlContent(stepContent);
-              steps.push({ title: stepTitle, bodyHtml: sanitizedContent.innerHTML, images });
-            });
-          }
-        }
-
-        // Final fallback: single-step article
-        if (steps.length === 0) {
-          const bodyContent = doc.body.cloneNode(true);
-          const images = [];
-          bodyContent.querySelectorAll('img').forEach(img => {
-            const src = img.getAttribute('src') || '';
-            const alt = img.getAttribute('alt') || '';
-            const sanitizedSrc = this.sanitizeImageUrl(src);
-            if (sanitizedSrc) {
-              images.push({ alt, dataUrlOrRemoteUrl: sanitizedSrc });
-              img.setAttribute('src', sanitizedSrc);
-            } else {
-              img.remove();
-            }
-          });
-          const sanitizedContent = this.sanitizeHtmlContent(bodyContent);
-          steps.push({ title: 'Procedure', bodyHtml: sanitizedContent.innerHTML, images });
-        }
-
-        // Add index to all steps
-        steps = steps.map((step, idx) => ({ index: idx + 1, ...step }));
-
-        // Debug logging
-        this._logServiceNowImport(title, doc, steps);
+        // Merge tags: tags extracted by normalizer + explicit category/topic fields
+        const snTags = raw.kb_category
+          ? [raw.kb_category]
+          : (raw.topic ? [raw.topic] : []);
+        const tags = [
+          ...new Set([...normalizedArticle.tags, ...snTags])
+        ];
 
         const article = {
           // Stable ID: reuse existing record if present, else create new UUID
           id: null,           // resolved below during upsert
           title,
           summary: raw.meta_description || raw.description || '',
-          introHtml: '',
-          relatedInfoHtml: '',
-          tags: raw.kb_category
-            ? [raw.kb_category]
-            : (raw.topic ? [raw.topic] : []),
+          introHtml:       normalizedArticle.introHtml       || '',
+          relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
+          tags,
           estimatedMinutes: null,
           steps,
+          parserMeta,
           source: 'servicenow',
           remoteId,
           syncedAt,
@@ -3002,6 +2691,12 @@ const Articles = {
     console.group(`📄 Article: ${article.title}`);
     console.log(`Total Steps: ${article.steps.length}`);
     console.log(`Source: ${article.source}`);
+    if (article.parserMeta) {
+      console.log(`Parser: ${article.parserMeta.parserName} (score: ${article.parserMeta.parserScore})`);
+      if (article.parserMeta.parsingWarnings && article.parserMeta.parsingWarnings.length > 0) {
+        console.warn(`Warnings: ${article.parserMeta.parsingWarnings.join('; ')}`);
+      }
+    }
     console.log(`---`);
     
     article.steps.forEach((step, index) => {
@@ -3019,9 +2714,8 @@ const Articles = {
   },
 
   /**
-   * Internal debug helper for ServiceNow import.
-   * Logs source, title, whether a Procedure section was found, step count and titles.
-   * Called automatically during importServiceNowArticles().
+   * Internal debug helper for ServiceNow import (kept for backward compatibility).
+   * New code should use Ingestion.logDebug() instead.
    * @param {string} title - Article title
    * @param {Document} doc - Normalised DOM document
    * @param {Array} steps - Segmented steps array
