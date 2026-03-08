@@ -331,9 +331,16 @@ function displayResults(articles) {
   
   resultsList.innerHTML = articles.map(article => {
     const stepCount = article.steps && Array.isArray(article.steps) ? article.steps.length : 0;
+    // Use article.title; warn and fall back if missing
+    let displayTitle = article.title;
+    if (!displayTitle || !displayTitle.trim()) {
+      console.warn('[Stepper] Search result has no title, using fallback. id:', article.id);
+      displayTitle = 'Untitled article';
+    }
+    console.log('[Stepper] Search result rendered: title=', displayTitle, '| id=', article.id);
     return `
       <div class="result-item" data-article-id="${article.id}">
-        <div class="result-item-title">${escapeHtml(article.title)}</div>
+        <div class="result-item-title">${escapeHtml(displayTitle)}</div>
         <div class="result-item-meta">
           ${article.summary ? `<div class="result-item-summary">${escapeHtml(article.summary)}</div>` : ''}
           <div class="result-item-info">
@@ -419,21 +426,36 @@ function renderStepView() {
   
   // Calculate progress percentage
   const progressPercentage = ((currentStepIndex + 1) / totalSteps) * 100;
-  
+
+  // Resolve article header title — fall back and warn if missing
+  let articleDisplayTitle = article.title;
+  if (!articleDisplayTitle || !articleDisplayTitle.trim()) {
+    console.warn('[Stepper] Article header rendered with no title, using fallback. id:', article.id);
+    articleDisplayTitle = 'Untitled article';
+  }
+  console.log('[Stepper] Article header rendered: title=', articleDisplayTitle, '| id=', article.id);
+
   // Render header: article title + progress bar only (no step counter text)
   articleHeader.innerHTML = `
-    <h2 class="step-view-title">${escapeHtml(article.title)}</h2>
+    <h2 class="step-view-title">${escapeHtml(articleDisplayTitle)}</h2>
     <div class="progress-bar-container">
       <div class="progress-bar-fill" style="width: ${progressPercentage}%"></div>
     </div>
   `;
   
-  // Extract pure title: strip "Step N:" prefix if present (added by the parser)
-  let displayTitle = currentStep.title;
+  // Extract pure step title: strip "Step N:" prefix if present (added by the parser).
+  // Guard against null/undefined up front to keep the remaining logic clean.
+  let displayTitle = (currentStep.title || '').trim();
   const stepPrefixMatch = displayTitle.match(/^Step\s+\d+\s*:\s*/i);
   if (stepPrefixMatch) {
-    displayTitle = displayTitle.slice(stepPrefixMatch[0].length);
+    displayTitle = displayTitle.slice(stepPrefixMatch[0].length).trim();
   }
+  // Never show an empty step title
+  if (!displayTitle) {
+    console.warn('[Stepper] Step has no display title, using fallback. Step index:', currentStepIndex + 1);
+    displayTitle = `Step ${currentStepIndex + 1}`;
+  }
+  console.log('[Stepper] Step rendered: step.title=', displayTitle, '| article=', article.title, '| stepIndex=', currentStepIndex + 1);
 
   // Render step content into the scrollable area
   articleContentScrollable.innerHTML = `
