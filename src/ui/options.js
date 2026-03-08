@@ -631,17 +631,6 @@ async function updateSnInfo() {
     }
     parts.push(`Articles stored: ${count}`);
 
-    // Show detailed sync stats when available (indexCount / fetchedCount / partialCount / parsedCount)
-    if (sn.syncStats) {
-      const { indexCount, fetchedCount, partialCount, parsedCount } = sn.syncStats;
-      const statParts = [];
-      if (indexCount   != null) statParts.push(`${indexCount} found`);
-      if (fetchedCount != null) statParts.push(`${fetchedCount} fetched`);
-      if (partialCount != null && partialCount > 0) statParts.push(`${partialCount} partial`);
-      if (parsedCount  != null) statParts.push(`${parsedCount} stored`);
-      if (statParts.length > 0) parts.push(statParts.join(', '));
-    }
-
     if (sn.lastError) {
       parts.push(`⚠ Last error: ${sn.lastError}`);
     }
