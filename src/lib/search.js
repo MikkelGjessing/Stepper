@@ -44,6 +44,106 @@ const Search = {
   },
 
   /**
+   * Build a structured search index for a single article.
+   *
+   * The index captures:
+   *   normalizedTitle   – title in normalised form
+   *   titleTokens       – individual title tokens (highest-weight field)
+   *   sectionTokens     – tokens from section headings
+   *   chapterTokens     – tokens from chapterTitle fields on steps
+   *   procedureTokens   – tokens from step titles and bodies
+   *   introTokens       – tokens from introHtml
+   *   tagsTokens        – tokens from tags array (lowest weight)
+   *   searchText        – pre-built concatenated normalised string
+   *
+   * Weighting (for reference by scoring functions):
+   *   title             – highest (×2 in searchText)
+   *   procedure/chapter – high
+   *   intro             – medium
+   *   tags              – low
+   *
+   * @param {Object} article - Article data object
+   * @returns {Object} Search index object
+   */
+  buildSearchIndex(article) {
+    const stripHtml = (html) => (html || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const norm = (text)    => this.normalizeText(text || '');
+    const tok  = (text)    => this.tokenize(text || '');
+
+    const normalizedTitle = norm(article.title);
+    const titleTokens = tok(article.title);
+
+    // Section headings (from parserMeta if available)
+    const sectionHeadings = (article.parserMeta && Array.isArray(article.parserMeta.sectionHeadings))
+      ? article.parserMeta.sectionHeadings
+      : [];
+    const sectionTokens = sectionHeadings.flatMap(h => tok(h));
+
+    // Chapter titles from steps
+    const chapterTitles = Array.isArray(article.steps)
+      ? article.steps.map(s => s.chapterTitle || '').filter(Boolean)
+      : [];
+    const chapterTokens = chapterTitles.flatMap(c => tok(c));
+
+    // Procedure tokens: step titles + step bodies
+    const procedureTokens = [];
+    if (Array.isArray(article.steps)) {
+      article.steps.forEach(step => {
+        tok(step.title).forEach(t => procedureTokens.push(t));
+        tok(stripHtml(step.bodyHtml)).forEach(t => procedureTokens.push(t));
+      });
+    }
+
+    // Intro tokens
+    const introTokens = tok(
+      stripHtml(article.introHtml || '') + ' ' + (article.summary || '')
+    );
+
+    // Tags tokens (lowest weight)
+    const tagsTokens = Array.isArray(article.tags)
+      ? article.tags.flatMap(tag => tok(tag))
+      : [];
+
+    // Build combined searchText (title double-weighted)
+    const parts = [
+      article.title || '',
+      article.title || '',                          // double weight
+      stripHtml(article.introHtml || ''),
+      article.summary || '',
+      ...sectionHeadings,
+      ...chapterTitles
+    ];
+    if (Array.isArray(article.steps)) {
+      article.steps.forEach(step => {
+        parts.push(step.title || '');
+        parts.push(stripHtml(step.bodyHtml || ''));
+        if (step.chapterTitle) parts.push(step.chapterTitle);
+      });
+    }
+    if (Array.isArray(article.tags)) {
+      parts.push(article.tags.join(' '));
+    }
+
+    const searchText = parts
+      .join(' ')
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return {
+      normalizedTitle,
+      titleTokens,
+      sectionTokens,
+      chapterTokens,
+      procedureTokens,
+      introTokens,
+      tagsTokens,
+      searchText
+    };
+  },
+
+  /**
    * Search articles by query with LLM integration
    * @param {string} query - Search query
    * @param {Array} articles - Articles to search
