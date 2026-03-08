@@ -755,7 +755,10 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
       // so we work only from the raw source fields here).
       const TITLE_FIELD_CANDIDATES = ['short_description', 'title', 'name', 'article_title', 'heading'];
       const SN_NOISE_RE = /copy\s+permalink|leave\s+a\s+comment|top\s+of\s+form|bottom\s+of\s+form/i;
-      const SECTION_HEADING_SW_RE = /^(?:procedure|instructions?|steps?\b|how\s+to|process|general\s+info(?:rmation)?|overview|introduction|summary|related\s+(?:information|articles?)|change\s+(?:log|history)|keywords?|tags?)/i;
+      // Section-label blacklist (mirrors BLACKLISTED_LABELS in Articles.resolveArticleTitle).
+      // Must be a full-string match so real titles starting with these words (e.g. "How to…")
+      // are not accidentally rejected. Anchored with ^ and \s*$ to enforce exact match.
+      const SECTION_HEADING_SW_RE = /^(?:procedure(?:\s*\(how\s+to\))?|instructions?|work\s+instructions?|steps?\b|process\b|general\s+info(?:rmation)?|overview|introduction|summary|background|audience|skills?\b|skills?\s+required|prerequisites?|related\s+(?:information|articles?|links?)|change\s+(?:log|history)|revision\s+history|appendix|keywords?|tags?|notes?|note\b|warning|important|caution|change|date\b|id\b|step\b|action\b|image\s+&amp;\s+details|image\s+and\s+details)\s*$/i;
       let title = '';
       let originalTitle = '';
       let titleSource = 'fallback';

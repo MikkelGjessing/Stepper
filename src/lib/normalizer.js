@@ -49,11 +49,13 @@ const ArticleNormalizer = {
 
   /**
    * Return true when the heading identifies an intro/general-info section.
+   * Includes audience, skills, and prerequisites headings which are KB-article
+   * metadata blocks that must never be mistaken for the article title.
    * @param {string} text - Trimmed heading text
    * @returns {boolean}
    */
   isIntroSectionHeading(text) {
-    return /^(?:\d+\.\s*)?(?:general\s+info(?:rmation)?|overview\b|introduction\b|summary\b|background\b)/i
+    return /^(?:\d+\.\s*)?(?:general\s+info(?:rmation)?|overview\b|introduction\b|summary\b|background\b|audience\b|skills?\b|skills?\s+required|prerequisites?\b)/i
       .test(text.trim());
   },
 

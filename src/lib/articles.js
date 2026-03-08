@@ -11,11 +11,13 @@
  * Article Schema:
  * {
  *   id: string (UUID),
- *   title: string,              ← resolved best-available title (see resolveArticleTitle)
- *   originalTitle: string,      ← raw title exactly as found in source (may be empty)
- *   titleSource: string,        ← which field/heuristic produced title
- *                                  ("short_description"|"title"|"name"|"h1"|"strong"|
- *                                   "first_line"|"filename"|"fallback")
+ *   title: string,                  ← resolved best-available title (see resolveArticleTitle)
+ *   originalTitle: string,          ← raw title exactly as found in source (may be empty)
+ *   originalTitleCandidate: string, ← first raw candidate found before filtering (debug)
+ *   titleSource: string,            ← which field/heuristic produced title
+ *                                      ("short_description"|"title"|"name"|"h1"|"topHeading"|
+ *                                       "strong"|"first_line"|"filename"|"fallback")
+ *   titleCandidates: string[],      ← all candidates considered, for debugging (optional)
  *   summary: string,
  *   introHtml: string (optional, general info / intro section HTML),
  *   relatedInfoHtml: string (optional, related information section HTML),
@@ -53,6 +55,10 @@
 const Articles = {
   // Constants
   MAX_TITLE_LENGTH_FROM_FIRST_LINE: 100,
+  /** Minimum character length for a heuristic-derived title to be considered substantive. */
+  MIN_SUBSTANTIVE_TITLE_LENGTH: 8,
+  /** Maximum characters to include in debug candidate preview strings. */
+  DEBUG_TITLE_PREVIEW_LENGTH: 80,
   
   /**
    * Generate UUID v4 using crypto API for better randomness
@@ -90,76 +96,141 @@ const Articles = {
    *
    * Priority order:
    *   1. Explicit API/metadata fields: short_description, title, name, article_title, heading
-   *   2. First <h1> in document
-   *   3. First <strong>/<b> that IS the entire text of its parent paragraph (DOCX title pattern)
-   *   4. First meaningful paragraph/heading in body (not a structural section heading)
-   *   5. fallbackTitle (e.g. filename without extension)
-   *   6. "Untitled article"
+   *   2. First valid <h1> in document (scans all h1s, skips template banners & section labels)
+   *   3. First valid <h2>/<h3> in document (first heading-like element before section labels)
+   *   4. First <strong>/<b> that IS the entire text of its parent paragraph (DOCX title pattern)
+   *   5. First meaningful paragraph/heading in body (not a structural section heading)
+   *   6. fallbackTitle (e.g. filename without extension)
+   *   7. "Untitled article"
    *
-   * Section headings ("Procedure", "General info", "Related information", "Change log", etc.)
-   * are never used as the article title.
+   * Section labels ("Audience", "Skills", "Procedure", "General info", "Notes", etc.)
+   * and template banners ("Standard template for…") are never used as article titles.
    *
    * @param {Object|null} rawSourceData - Raw source metadata (ServiceNow fields, etc.) or null
    * @param {Document|null} doc         - Parsed HTML document, or null
    * @param {string}  [fallbackTitle]   - Fallback title (e.g. filename without extension)
-   * @returns {{ title: string, originalTitle: string, titleSource: string }}
+   * @returns {{ title: string, originalTitle: string, originalTitleCandidate: string,
+   *             titleSource: string, titleCandidates: string[] }}
    */
   resolveArticleTitle(rawSourceData, doc, fallbackTitle) {
     const UI_NOISE_RE = /copy\s+permalink|leave\s+a\s+comment|top\s+of\s+form|bottom\s+of\s+form/i;
 
-    /** Decode HTML entities and trim whitespace from a candidate string. */
+    // KB-article template banners that should never be used as article titles
+    const TEMPLATE_BANNER_RE = /^standard\s+template\s+for\b|^template\s+for\s+|^kb\s+article\s+template\b/i;
+
+    // Exact section-label blacklist — these values (case-insensitive) must NEVER be titles
+    const BLACKLISTED_LABELS = new Set([
+      'audience', 'skills', 'skills required',
+      'general info', 'general information',
+      'procedure', 'procedure (how to)',
+      'instructions', 'work instructions',
+      'related articles', 'related information', 'related links',
+      'change log', 'change history', 'change',
+      'date', 'id', 'step', 'action',
+      'image & details', 'image and details',
+      'notes', 'note', 'warning', 'important', 'caution',
+      'overview', 'introduction', 'summary', 'background',
+      'keywords', 'tags', 'appendix', 'revision history', 'prerequisites'
+    ]);
+
+    /** Decode HTML entities, collapse whitespace, and trim a candidate string.
+     *  Uses innerHTML+textContent — a safe browser idiom for entity decoding since
+     *  we never read back innerHTML, only the sanitised plain-text value. */
     const cleanCandidate = (t) => {
       if (!t || typeof t !== 'string') return '';
-      // Use a temporary DOM element to decode HTML entities
       const tmp = document.createElement('div');
       tmp.innerHTML = t;
-      return (tmp.textContent || '').trim();
+      return (tmp.textContent || '').replace(/\s+/g, ' ').trim();
     };
 
-    /** Return true if the text looks like a structural section heading, not an article title. */
-    const isSectionHeading = (text) => {
-      if (!text) return false;
+    /** Return true if the text must be rejected as an article title. */
+    const isBadCandidate = (text) => {
+      if (!text) return true;
       const t = text.trim();
-      return ArticleNormalizer.isProcedureSectionHeading(t) ||
-             ArticleNormalizer.isSkipSectionHeading(t) ||
-             ArticleNormalizer.isIntroSectionHeading(t) ||
-             ArticleNormalizer.isTagsSectionHeading(t);
+      if (!t) return true;
+      if (UI_NOISE_RE.test(t)) return true;
+      if (TEMPLATE_BANNER_RE.test(t)) return true;
+      if (BLACKLISTED_LABELS.has(t.toLowerCase())) return true;
+      // Handle numbered section labels: "1. Procedure", "2. Audience", etc.
+      const numberedMatch = t.match(/^\d+[.)]\s*(.+)$/);
+      if (numberedMatch && BLACKLISTED_LABELS.has(numberedMatch[1].trim().toLowerCase())) return true;
+      return false;
     };
 
-    let resolvedTitle = '';
-    let originalTitle = '';
-    let titleSource   = 'fallback';
+    /** Return true if the title looks substantive enough to use as an article title. */
+    const isSubstantialTitle = (text) => {
+      if (!text) return false;
+      return text.trim().length > this.MIN_SUBSTANTIVE_TITLE_LENGTH;
+    };
 
-    // Priority 1: Explicit source metadata fields
+    const titleCandidates = [];
+    let resolvedTitle = '';
+    let originalTitleCandidate = '';
+    let titleSource = 'fallback';
+
+    // ── Priority 1: Explicit source metadata fields ─────────────────────────
     if (rawSourceData) {
       const CANDIDATE_FIELDS = ['short_description', 'title', 'name', 'article_title', 'heading'];
       for (const field of CANDIDATE_FIELDS) {
         const raw = rawSourceData[field];
         if (!raw) continue;
         const cleaned = cleanCandidate(String(raw));
-        if (cleaned && !isSectionHeading(cleaned) && !UI_NOISE_RE.test(cleaned)) {
-          resolvedTitle = cleaned;
-          originalTitle = cleaned;
-          titleSource   = field;
-          break;
+        if (cleaned) {
+          titleCandidates.push(`[${field}] ${cleaned}`);
+          if (!originalTitleCandidate) originalTitleCandidate = cleaned;
+          if (!isBadCandidate(cleaned)) {
+            resolvedTitle = cleaned;
+            titleSource   = field;
+            console.debug(`[Stepper] resolveArticleTitle: accepted metadata field "${field}" → "${cleaned}"`);
+            break;
+          }
+          console.debug(`[Stepper] resolveArticleTitle: rejected metadata field "${field}" ("${cleaned}")`);
         }
       }
     }
 
-    // Priority 2: First <h1> in document
+    // ── Priority 2: First valid <h1> in document ────────────────────────────
     if (!resolvedTitle && doc) {
-      const h1 = doc.querySelector('h1');
-      if (h1) {
+      for (const h1 of doc.querySelectorAll('h1')) {
         const cleaned = h1.textContent.trim();
-        if (cleaned && !isSectionHeading(cleaned) && !UI_NOISE_RE.test(cleaned)) {
-          resolvedTitle = cleaned;
-          titleSource   = 'h1';
+        if (cleaned) {
+          titleCandidates.push(`[h1] ${cleaned}`);
+          if (!originalTitleCandidate) originalTitleCandidate = cleaned;
+          if (!isBadCandidate(cleaned) && isSubstantialTitle(cleaned)) {
+            resolvedTitle = cleaned;
+            titleSource   = 'h1';
+            console.debug(`[Stepper] resolveArticleTitle: accepted h1 → "${cleaned}"`);
+            break;
+          }
+          console.debug(`[Stepper] resolveArticleTitle: rejected h1 ("${cleaned}")`);
         }
       }
     }
 
-    // Priority 3: First <strong>/<b> whose parent paragraph text equals the bold text
-    // (the bold element IS the entire paragraph — a common DOCX title pattern)
+    // ── Priority 3: First valid <h2>/<h3> heading before a section label ────
+    if (!resolvedTitle && doc) {
+      for (const el of doc.querySelectorAll('h2, h3')) {
+        const cleaned = el.textContent.trim();
+        if (cleaned) {
+          titleCandidates.push(`[${el.tagName.toLowerCase()}] ${cleaned}`);
+          if (!originalTitleCandidate) originalTitleCandidate = cleaned;
+          if (!isBadCandidate(cleaned) && isSubstantialTitle(cleaned)) {
+            resolvedTitle = cleaned;
+            titleSource   = 'topHeading';
+            console.debug(`[Stepper] resolveArticleTitle: accepted ${el.tagName} → "${cleaned}"`);
+            break;
+          }
+          // If we hit a known section label, stop scanning — the title must come before it
+          if (isBadCandidate(cleaned) && !TEMPLATE_BANNER_RE.test(cleaned) && !UI_NOISE_RE.test(cleaned)) {
+            console.debug(`[Stepper] resolveArticleTitle: stopped h2/h3 scan at section label "${cleaned}"`);
+            break;
+          }
+          console.debug(`[Stepper] resolveArticleTitle: rejected ${el.tagName} ("${cleaned}")`);
+        }
+      }
+    }
+
+    // ── Priority 4: First <strong>/<b> that IS the entire parent paragraph ──
     if (!resolvedTitle && doc) {
       const boldEl = doc.querySelector('strong, b');
       if (boldEl) {
@@ -167,48 +238,73 @@ const Articles = {
         const parentEl   = boldEl.parentElement;
         const parentText = parentEl ? parentEl.textContent.trim() : boldText;
         const inHeading  = parentEl && /^H[1-6]$/.test(parentEl.tagName);
-        if (boldText && parentText === boldText && !inHeading &&
-            !isSectionHeading(boldText) && !UI_NOISE_RE.test(boldText)) {
-          resolvedTitle = boldText;
-          titleSource   = 'strong';
-        }
-      }
-    }
-
-    // Priority 4: First meaningful line in body (not a section heading, not UI noise)
-    if (!resolvedTitle && doc) {
-      const body = doc.body || doc.documentElement;
-      if (body) {
-        for (const el of body.querySelectorAll('p, h1, h2, h3, h4, h5, h6')) {
-          const text = el.textContent.trim();
-          if (text.length > 3 && !isSectionHeading(text) && !UI_NOISE_RE.test(text)) {
-            // Trim to MAX_TITLE_LENGTH_FROM_FIRST_LINE chars (no trailing "...")
-            resolvedTitle = text.length > this.MAX_TITLE_LENGTH_FROM_FIRST_LINE
-              ? text.substring(0, this.MAX_TITLE_LENGTH_FROM_FIRST_LINE)
-              : text;
-            titleSource   = 'first_line';
-            break;
+        if (boldText) {
+          titleCandidates.push(`[strong] ${boldText}`);
+          if (!originalTitleCandidate) originalTitleCandidate = boldText;
+          if (parentText === boldText && !inHeading &&
+              !isBadCandidate(boldText) && isSubstantialTitle(boldText)) {
+            resolvedTitle = boldText;
+            titleSource   = 'strong';
+            console.debug(`[Stepper] resolveArticleTitle: accepted strong/b → "${boldText}"`);
+          } else {
+            console.debug(`[Stepper] resolveArticleTitle: rejected strong/b ("${boldText}")`);
           }
         }
       }
     }
 
-    // Priority 5: Fallback title (e.g. filename without extension)
-    if (!resolvedTitle && fallbackTitle) {
-      const cleaned = cleanCandidate(fallbackTitle);
-      if (cleaned) {
-        resolvedTitle = cleaned;
-        titleSource   = 'filename';
+    // ── Priority 5: First meaningful line in body ───────────────────────────
+    if (!resolvedTitle && doc) {
+      const body = doc.body || doc.documentElement;
+      if (body) {
+        for (const el of body.querySelectorAll('p, h1, h2, h3, h4, h5, h6')) {
+          const text = el.textContent.trim();
+          if (text) {
+            titleCandidates.push(`[${el.tagName.toLowerCase()}:first_line] ${text.substring(0, this.DEBUG_TITLE_PREVIEW_LENGTH)}`);
+            if (!originalTitleCandidate) originalTitleCandidate = text;
+            if (!isBadCandidate(text) && isSubstantialTitle(text)) {
+              resolvedTitle = text.length > this.MAX_TITLE_LENGTH_FROM_FIRST_LINE
+                ? text.substring(0, this.MAX_TITLE_LENGTH_FROM_FIRST_LINE)
+                : text;
+              titleSource   = 'first_line';
+              console.debug(`[Stepper] resolveArticleTitle: accepted first_line (${el.tagName}) → "${resolvedTitle}"`);
+              break;
+            }
+          }
+        }
       }
     }
 
-    // Priority 6: Final fallback
+    // ── Priority 6: Fallback title (e.g. filename without extension) ────────
+    if (!resolvedTitle && fallbackTitle) {
+      const cleaned = cleanCandidate(fallbackTitle);
+      if (cleaned) {
+        titleCandidates.push(`[filename] ${cleaned}`);
+        if (!originalTitleCandidate) originalTitleCandidate = cleaned;
+        resolvedTitle = cleaned;
+        titleSource   = 'filename';
+        console.debug(`[Stepper] resolveArticleTitle: using filename fallback → "${cleaned}"`);
+      }
+    }
+
+    // ── Priority 7: Final fallback ───────────────────────────────────────────
     if (!resolvedTitle) {
       resolvedTitle = 'Untitled article';
       titleSource   = 'fallback';
+      console.debug('[Stepper] resolveArticleTitle: using "Untitled article" fallback');
     }
 
-    return { title: resolvedTitle, originalTitle, titleSource };
+    console.debug(
+      `[Stepper] resolveArticleTitle: final title="${resolvedTitle}" | source=${titleSource} | candidates=${titleCandidates.length}`
+    );
+
+    return {
+      title: resolvedTitle,
+      originalTitle: originalTitleCandidate,
+      originalTitleCandidate,
+      titleSource,
+      titleCandidates
+    };
   },
 
   /**
@@ -1480,12 +1576,20 @@ const Articles = {
       const doc = parser.parseFromString(content, 'text/html');
       
       // Resolve title using shared helper (finds h1, then strong, then first line)
-      const { title, originalTitle, titleSource } = this.resolveArticleTitle(null, doc, fallbackTitle);
+      const { title, originalTitle, originalTitleCandidate, titleSource, titleCandidates } =
+        this.resolveArticleTitle(null, doc, fallbackTitle);
 
-      // Remove the h1 element (if it was used as title) to avoid including it in step content
-      const h1 = doc.querySelector('h1');
-      if (h1 && h1.textContent.trim() === title) {
-        h1.remove();
+      // Remove the element that was used as the title to avoid including it in step content
+      if (titleSource === 'h1') {
+        const h1 = doc.querySelector('h1');
+        if (h1 && h1.textContent.trim() === title) h1.remove();
+      } else if (titleSource === 'topHeading') {
+        const body = doc.body || doc.documentElement;
+        if (body) {
+          for (const el of body.querySelectorAll('h2, h3')) {
+            if (el.textContent.trim() === title) { el.remove(); break; }
+          }
+        }
       }
 
       // Run the shared ingestion pipeline (normalise → strategy-select → parse)
@@ -1512,7 +1616,9 @@ const Articles = {
         id: this.generateUUID(),
         title,
         originalTitle,
+        originalTitleCandidate,
         titleSource,
+        titleCandidates,
         summary,
         introHtml:       normalizedArticle.introHtml       || '',
         relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
@@ -1601,14 +1707,26 @@ const Articles = {
       const doc = parser.parseFromString(htmlContent, 'text/html');
 
       // Resolve title using shared helper — prevents section headings (e.g. "Procedure",
-      // "General info") from being mistaken for the article title.
-      const { title, originalTitle, titleSource } = this.resolveArticleTitle(null, doc, fallbackTitle);
+      // "General info", "Audience") from being mistaken for the article title.
+      const { title, originalTitle, originalTitleCandidate, titleSource, titleCandidates } =
+        this.resolveArticleTitle(null, doc, fallbackTitle);
 
       // Remove the element that was used as the title from the document to avoid
       // it appearing again inside step content.
       if (titleSource === 'h1') {
         const h1 = doc.querySelector('h1');
         if (h1) h1.remove();
+      } else if (titleSource === 'topHeading') {
+        // Scan h2/h3 elements for the one matching the resolved title and remove it
+        const body = doc.body || doc.documentElement;
+        if (body) {
+          for (const el of body.querySelectorAll('h2, h3')) {
+            if (el.textContent.trim() === title) {
+              el.remove();
+              break;
+            }
+          }
+        }
       } else if (titleSource === 'strong') {
         const boldEl = doc.querySelector('strong, b');
         if (boldEl && boldEl.textContent.trim() === title) {
@@ -1659,7 +1777,9 @@ const Articles = {
         id: this.generateUUID(),
         title,
         originalTitle,
+        originalTitleCandidate,
         titleSource,
+        titleCandidates,
         summary,
         introHtml:       normalizedArticle.introHtml       || '',
         relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
@@ -2750,7 +2870,8 @@ const Articles = {
         // Resolve the best available title using the priority chain.
         // raw fields take priority; doc content provides a fallback when all
         // API title fields are absent or contain only a section heading.
-        const { title, originalTitle, titleSource } = this.resolveArticleTitle(raw, doc, null);
+        const { title, originalTitle, originalTitleCandidate, titleSource, titleCandidates } =
+          this.resolveArticleTitle(raw, doc, null);
 
         const { steps, parserMeta, normalizedArticle } = Ingestion.ingest(
           doc,
@@ -2774,7 +2895,9 @@ const Articles = {
           id: null,           // resolved below during upsert
           title,
           originalTitle,
+          originalTitleCandidate,
           titleSource,
+          titleCandidates,
           summary: raw.meta_description || raw.description || '',
           introHtml:       normalizedArticle.introHtml       || '',
           relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
