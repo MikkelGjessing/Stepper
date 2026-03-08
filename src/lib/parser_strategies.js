@@ -29,8 +29,6 @@ const MIN_SCORE_THRESHOLD = 10;
 
 /** Maximum length for step titles extracted from text content. */
 const MAX_TITLE_LENGTH = 80;
-/** Length to truncate to (accounts for "..." suffix). */
-const TRUNCATED_TITLE_LENGTH = MAX_TITLE_LENGTH - 3;
 
 // ─── Shared internal helpers ──────────────────────────────────────────────────
 
@@ -44,7 +42,7 @@ function _extractTitleFromText(text) {
   const firstSentence = (text || '').replace(/\s+/g, ' ')
     .split(/[.!?](?:\s|$)/)[0].trim();
   return firstSentence.length > MAX_TITLE_LENGTH
-    ? firstSentence.substring(0, TRUNCATED_TITLE_LENGTH) + '...'
+    ? firstSentence.substring(0, MAX_TITLE_LENGTH)
     : firstSentence;
 }
 

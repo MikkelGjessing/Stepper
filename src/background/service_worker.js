@@ -751,8 +751,30 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
   for (const raw of rawArticles) {
     try {
       const remoteId = raw.sys_id || raw.kb_number || raw.number || null;
-      const title =
-        raw.short_description || raw.title || raw.name || '(Untitled)';
+      // Resolve title with prioritised fallback (service worker has no DOMParser
+      // so we work only from the raw source fields here).
+      const TITLE_FIELD_CANDIDATES = ['short_description', 'title', 'name', 'article_title', 'heading'];
+      const SN_NOISE_RE = /copy\s+permalink|leave\s+a\s+comment|top\s+of\s+form|bottom\s+of\s+form/i;
+      const SECTION_HEADING_SW_RE = /^(?:procedure|instructions?|steps?\b|how\s+to|process|general\s+info(?:rmation)?|overview|introduction|summary|related\s+(?:information|articles?)|change\s+(?:log|history)|keywords?|tags?)/i;
+      let title = '';
+      let originalTitle = '';
+      let titleSource = 'fallback';
+      for (const field of TITLE_FIELD_CANDIDATES) {
+        const raw_val = raw[field];
+        if (!raw_val) continue;
+        const cleaned = String(raw_val).trim();
+        if (cleaned && !SECTION_HEADING_SW_RE.test(cleaned) && !SN_NOISE_RE.test(cleaned)) {
+          title = cleaned;
+          originalTitle = cleaned;
+          titleSource = field;
+          break;
+        }
+      }
+      if (!title) {
+        title = 'Untitled article';
+        titleSource = 'fallback';
+      }
+
       const { value: rawHtml, field: bodyField } = detectBodyField(raw);
       const rawBodyLength = rawHtml.trim().length;
 
@@ -771,7 +793,7 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
 
       // Debug logging (mirrors Articles.logStepInfo() format for uploaded articles)
       console.log(
-        `[ServiceNow Import] title="${title}" | bodyField=${bodyField || 'none'} | bodyLen=${rawBodyLength} | ` +
+        `[Stepper] Article imported (servicenow-sw): title="${title}" | titleSource=${titleSource} | bodyField=${bodyField || 'none'} | bodyLen=${rawBodyLength} | ` +
         `parseStatus=${parseStatus} | steps=${steps.length}` +
         (steps.length > 0 ? ` | titles: ${steps.map(s => s.title).join(' | ')}` : '')
       );
@@ -784,6 +806,8 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
       const article = {
         id: null, // resolved during upsert below
         title,
+        originalTitle,
+        titleSource,
         summary,
         introHtml: '',
         relatedInfoHtml: '',
@@ -1076,7 +1100,7 @@ function buildStepsFromNumberedList(html) {
       const text = htmlToPlainText(liM[1]).trim();
       if (!text) continue;
       const firstSentence = text.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
-      const stepTitle = firstSentence.length > 80 ? firstSentence.substring(0, 77) + '...' : firstSentence;
+      const stepTitle = firstSentence.length > 80 ? firstSentence.substring(0, 80) : firstSentence;
       steps.push({ index: idx++, title: stepTitle, bodyHtml: `<p>${liM[1]}</p>`, images: [] });
     }
     if (steps.length > 0) return steps;
@@ -1096,7 +1120,7 @@ function buildStepsFromNumberedList(html) {
       if (currentStep) steps.push(currentStep);
       const stepText = numMatch[2].trim();
       const firstSentence = stepText.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
-      const stepTitle = firstSentence.length > 80 ? firstSentence.substring(0, 77) + '...' : firstSentence;
+      const stepTitle = firstSentence.length > 80 ? firstSentence.substring(0, 80) : firstSentence;
       currentStep = { index: idx++, title: stepTitle, bodyHtml: bm[0], images: [] };
     } else if (currentStep) {
       // Append continuation content to current step

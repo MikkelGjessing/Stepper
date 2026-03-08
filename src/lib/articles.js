@@ -11,7 +11,11 @@
  * Article Schema:
  * {
  *   id: string (UUID),
- *   title: string,
+ *   title: string,              ← resolved best-available title (see resolveArticleTitle)
+ *   originalTitle: string,      ← raw title exactly as found in source (may be empty)
+ *   titleSource: string,        ← which field/heuristic produced title
+ *                                  ("short_description"|"title"|"name"|"h1"|"strong"|
+ *                                   "first_line"|"filename"|"fallback")
  *   summary: string,
  *   introHtml: string (optional, general info / intro section HTML),
  *   relatedInfoHtml: string (optional, related information section HTML),
@@ -79,6 +83,132 @@ const Articles = {
       const v = c === 'x' ? r : (r & 0x3 | 0x8);
       return v.toString(16);
     });
+  },
+
+  /**
+   * Resolve the best available article title from raw source metadata and document content.
+   *
+   * Priority order:
+   *   1. Explicit API/metadata fields: short_description, title, name, article_title, heading
+   *   2. First <h1> in document
+   *   3. First <strong>/<b> that IS the entire text of its parent paragraph (DOCX title pattern)
+   *   4. First meaningful paragraph/heading in body (not a structural section heading)
+   *   5. fallbackTitle (e.g. filename without extension)
+   *   6. "Untitled article"
+   *
+   * Section headings ("Procedure", "General info", "Related information", "Change log", etc.)
+   * are never used as the article title.
+   *
+   * @param {Object|null} rawSourceData - Raw source metadata (ServiceNow fields, etc.) or null
+   * @param {Document|null} doc         - Parsed HTML document, or null
+   * @param {string}  [fallbackTitle]   - Fallback title (e.g. filename without extension)
+   * @returns {{ title: string, originalTitle: string, titleSource: string }}
+   */
+  resolveArticleTitle(rawSourceData, doc, fallbackTitle) {
+    const UI_NOISE_RE = /copy\s+permalink|leave\s+a\s+comment|top\s+of\s+form|bottom\s+of\s+form/i;
+
+    /** Decode HTML entities and trim whitespace from a candidate string. */
+    const cleanCandidate = (t) => {
+      if (!t || typeof t !== 'string') return '';
+      // Use a temporary DOM element to decode HTML entities
+      const tmp = document.createElement('div');
+      tmp.innerHTML = t;
+      return (tmp.textContent || '').trim();
+    };
+
+    /** Return true if the text looks like a structural section heading, not an article title. */
+    const isSectionHeading = (text) => {
+      if (!text) return false;
+      const t = text.trim();
+      return ArticleNormalizer.isProcedureSectionHeading(t) ||
+             ArticleNormalizer.isSkipSectionHeading(t) ||
+             ArticleNormalizer.isIntroSectionHeading(t) ||
+             ArticleNormalizer.isTagsSectionHeading(t);
+    };
+
+    let resolvedTitle = '';
+    let originalTitle = '';
+    let titleSource   = 'fallback';
+
+    // Priority 1: Explicit source metadata fields
+    if (rawSourceData) {
+      const CANDIDATE_FIELDS = ['short_description', 'title', 'name', 'article_title', 'heading'];
+      for (const field of CANDIDATE_FIELDS) {
+        const raw = rawSourceData[field];
+        if (!raw) continue;
+        const cleaned = cleanCandidate(String(raw));
+        if (cleaned && !isSectionHeading(cleaned) && !UI_NOISE_RE.test(cleaned)) {
+          resolvedTitle = cleaned;
+          originalTitle = cleaned;
+          titleSource   = field;
+          break;
+        }
+      }
+    }
+
+    // Priority 2: First <h1> in document
+    if (!resolvedTitle && doc) {
+      const h1 = doc.querySelector('h1');
+      if (h1) {
+        const cleaned = h1.textContent.trim();
+        if (cleaned && !isSectionHeading(cleaned) && !UI_NOISE_RE.test(cleaned)) {
+          resolvedTitle = cleaned;
+          titleSource   = 'h1';
+        }
+      }
+    }
+
+    // Priority 3: First <strong>/<b> whose parent paragraph text equals the bold text
+    // (the bold element IS the entire paragraph — a common DOCX title pattern)
+    if (!resolvedTitle && doc) {
+      const boldEl = doc.querySelector('strong, b');
+      if (boldEl) {
+        const boldText   = boldEl.textContent.trim();
+        const parentEl   = boldEl.parentElement;
+        const parentText = parentEl ? parentEl.textContent.trim() : boldText;
+        const inHeading  = parentEl && /^H[1-6]$/.test(parentEl.tagName);
+        if (boldText && parentText === boldText && !inHeading &&
+            !isSectionHeading(boldText) && !UI_NOISE_RE.test(boldText)) {
+          resolvedTitle = boldText;
+          titleSource   = 'strong';
+        }
+      }
+    }
+
+    // Priority 4: First meaningful line in body (not a section heading, not UI noise)
+    if (!resolvedTitle && doc) {
+      const body = doc.body || doc.documentElement;
+      if (body) {
+        for (const el of body.querySelectorAll('p, h1, h2, h3, h4, h5, h6')) {
+          const text = el.textContent.trim();
+          if (text.length > 3 && !isSectionHeading(text) && !UI_NOISE_RE.test(text)) {
+            // Trim to MAX_TITLE_LENGTH_FROM_FIRST_LINE chars (no trailing "...")
+            resolvedTitle = text.length > this.MAX_TITLE_LENGTH_FROM_FIRST_LINE
+              ? text.substring(0, this.MAX_TITLE_LENGTH_FROM_FIRST_LINE)
+              : text;
+            titleSource   = 'first_line';
+            break;
+          }
+        }
+      }
+    }
+
+    // Priority 5: Fallback title (e.g. filename without extension)
+    if (!resolvedTitle && fallbackTitle) {
+      const cleaned = cleanCandidate(fallbackTitle);
+      if (cleaned) {
+        resolvedTitle = cleaned;
+        titleSource   = 'filename';
+      }
+    }
+
+    // Priority 6: Final fallback
+    if (!resolvedTitle) {
+      resolvedTitle = 'Untitled article';
+      titleSource   = 'fallback';
+    }
+
+    return { title: resolvedTitle, originalTitle, titleSource };
   },
 
   /**
@@ -1204,15 +1334,20 @@ const Articles = {
     try {
       const lines = content.split('\n');
       let title = '';
+      let originalTitle = '';
+      let titleSource = 'fallback';
 
       // Parse title from first # heading, remove it from body lines
       const h1Idx = lines.findIndex(l => /^#\s+/.test(l.trim()));
       let bodyLines;
       if (h1Idx >= 0) {
         title = lines[h1Idx].trim().replace(/^#+\s*/, '');
+        originalTitle = title;
+        titleSource = 'h1';
         bodyLines = lines.filter((_, i) => i !== h1Idx);
       } else {
-        title = fallbackTitle || 'Untitled Article';
+        title = fallbackTitle || 'Untitled article';
+        titleSource = fallbackTitle ? 'filename' : 'fallback';
         bodyLines = lines;
       }
 
@@ -1234,9 +1369,13 @@ const Articles = {
         if (firstP) summary = firstP.textContent.trim();
       }
 
+      console.log(`[Stepper] Article imported (markdown): title="${title}" | titleSource=${titleSource} | steps=${steps.length}`);
+
       const articleData = {
         id: this.generateUUID(),
         title,
+        originalTitle,
+        titleSource,
         summary,
         introHtml:       normalizedArticle.introHtml       || '',
         relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
@@ -1273,7 +1412,9 @@ const Articles = {
     try {
       // Use first line as title if it's short, otherwise use fallback
       const lines = content.split('\n');
-      let title = fallbackTitle || 'Untitled Article';
+      let title = fallbackTitle || 'Untitled article';
+      let originalTitle = '';
+      let titleSource = fallbackTitle ? 'filename' : 'fallback';
       let bodyContent = content;
       
       // If first line is short (< MAX_TITLE_LENGTH_FROM_FIRST_LINE chars), use it as title
@@ -1282,6 +1423,8 @@ const Articles = {
         if (firstLineTrimmed.length > 0 && 
             firstLineTrimmed.length < this.MAX_TITLE_LENGTH_FROM_FIRST_LINE) {
           title = firstLineTrimmed;
+          originalTitle = firstLineTrimmed;
+          titleSource = 'first_line';
           bodyContent = lines.slice(1).join('\n').trim();
         }
       }
@@ -1289,12 +1432,16 @@ const Articles = {
       // Escape HTML and convert newlines to <br>
       const escapedContent = this.escapeHtml(bodyContent || content);
       const bodyHtml = escapedContent.replace(/\n/g, '<br>');
+
+      console.log(`[Stepper] Article imported (txt): title="${title}" | titleSource=${titleSource}`);
       
       return {
         ok: true,
         article: {
           id: this.generateUUID(),
           title: title,
+          originalTitle,
+          titleSource,
           summary: '',
           tags: [],
           estimatedMinutes: null,
@@ -1332,12 +1479,12 @@ const Articles = {
       const parser = new DOMParser();
       const doc = parser.parseFromString(content, 'text/html');
       
-      // Get title from <h1>, use fallback if not found
+      // Resolve title using shared helper (finds h1, then strong, then first line)
+      const { title, originalTitle, titleSource } = this.resolveArticleTitle(null, doc, fallbackTitle);
+
+      // Remove the h1 element (if it was used as title) to avoid including it in step content
       const h1 = doc.querySelector('h1');
-      const title = h1 ? h1.textContent.trim() : (fallbackTitle || 'Untitled Article');
-      
-      // Remove h1 from document to avoid including it in step content
-      if (h1) {
+      if (h1 && h1.textContent.trim() === title) {
         h1.remove();
       }
 
@@ -1359,9 +1506,13 @@ const Articles = {
         }
       }
 
+      console.log(`[Stepper] Article imported (html): title="${title}" | titleSource=${titleSource} | steps=${steps.length}`);
+
       const articleData = {
         id: this.generateUUID(),
         title,
+        originalTitle,
+        titleSource,
         summary,
         introHtml:       normalizedArticle.introHtml       || '',
         relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
@@ -1449,25 +1600,38 @@ const Articles = {
       const parser = new DOMParser();
       const doc = parser.parseFromString(htmlContent, 'text/html');
 
-      // Extract title
-      let title = '';
-      const h1 = doc.querySelector('h1');
-      if (h1) {
-        title = h1.textContent.trim();
-        h1.remove(); // Remove h1 from content to avoid duplication
-      } else {
-        // Try to find first bold/paragraph or use filename
-        const strong = doc.querySelector('strong, b');
-        const titleParagraph = doc.querySelector('p');
-        if (strong && strong.textContent.trim()) {
-          title = strong.textContent.trim();
-          strong.remove();
-        } else if (titleParagraph && titleParagraph.textContent.trim()) {
-          title = titleParagraph.textContent.trim();
-          titleParagraph.remove(); // Remove to avoid duplication in steps
-        } else {
-          // Use fallback title
-          title = fallbackTitle || 'Untitled Article';
+      // Resolve title using shared helper — prevents section headings (e.g. "Procedure",
+      // "General info") from being mistaken for the article title.
+      const { title, originalTitle, titleSource } = this.resolveArticleTitle(null, doc, fallbackTitle);
+
+      // Remove the element that was used as the title from the document to avoid
+      // it appearing again inside step content.
+      if (titleSource === 'h1') {
+        const h1 = doc.querySelector('h1');
+        if (h1) h1.remove();
+      } else if (titleSource === 'strong') {
+        const boldEl = doc.querySelector('strong, b');
+        if (boldEl && boldEl.textContent.trim() === title) {
+          const parent = boldEl.parentElement;
+          // Remove the whole parent paragraph if it is just the bold title
+          if (parent && parent.textContent.trim() === title) {
+            parent.remove();
+          } else {
+            boldEl.remove();
+          }
+        }
+      } else if (titleSource === 'first_line') {
+        const body = doc.body || doc.documentElement;
+        if (body) {
+          for (const el of body.querySelectorAll('p, h2, h3, h4, h5, h6')) {
+            const text = el.textContent.trim();
+            // Match exact title text, or handle the case where title was truncated
+            // to MAX_TITLE_LENGTH_FROM_FIRST_LINE chars and text starts with it.
+            if (text === title || (title.length === this.MAX_TITLE_LENGTH_FROM_FIRST_LINE && text.startsWith(title))) {
+              el.remove();
+              break;
+            }
+          }
         }
       }
 
@@ -1489,9 +1653,13 @@ const Articles = {
         }
       }
 
+      console.log(`[Stepper] Article imported (docx): title="${title}" | titleSource=${titleSource} | steps=${steps.length}`);
+
       const articleData = {
         id: this.generateUUID(),
         title,
+        originalTitle,
+        titleSource,
         summary,
         introHtml:       normalizedArticle.introHtml       || '',
         relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
@@ -2052,7 +2220,10 @@ const Articles = {
       if (stepColIdx >= 0 && cells[stepColIdx]) {
         const stepCellText = cells[stepColIdx].textContent.trim();
         if (/^\d+$/.test(stepCellText)) {
-          stepTitle = `Step ${stepCellText}`;
+          // Step column has only a number — derive a meaningful title from the
+          // action column content instead of using the generic "Step N" label.
+          const firstSentence = mainText.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
+          stepTitle = firstSentence.length > 80 ? firstSentence.substring(0, 80) : firstSentence;
           stepNum = parseInt(stepCellText, 10) + 1;
         } else if (stepCellText) {
           stepTitle = stepCellText;
@@ -2062,7 +2233,7 @@ const Articles = {
         }
       } else {
         const firstSentence = mainText.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
-        stepTitle = firstSentence.length > 60 ? firstSentence.substring(0, 57) + '...' : firstSentence;
+        stepTitle = firstSentence.length > 80 ? firstSentence.substring(0, 80) : firstSentence;
         stepNum++;
       }
 
@@ -2188,7 +2359,7 @@ const Articles = {
           const liText = li.textContent.trim();
           const firstSentence = liText.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
           const liTitle = firstSentence.length > 80
-            ? firstSentence.substring(0, 77) + '...'
+            ? firstSentence.substring(0, 80)
             : firstSentence;
           const liDiv = document.createElement('div');
           liDiv.appendChild(li.cloneNode(true));
@@ -2218,7 +2389,7 @@ const Articles = {
           flushCurrentStep();
           const stepText = numberedMatch[2].trim();
           const firstLine = stepText.replace(/\s+/g, ' ').split(/[.!?](?:\s|$)/)[0].trim();
-          currentTitle = firstLine.length > 80 ? firstLine.substring(0, 77) + '...' : firstLine;
+          currentTitle = firstLine.length > 80 ? firstLine.substring(0, 80) : firstLine;
           currentDiv = document.createElement('div');
           currentDiv.appendChild(node.cloneNode(true));
           globalStepNum++;
@@ -2566,18 +2737,20 @@ const Articles = {
       try {
         // Resolve the best available identifier
         const remoteId = raw.sys_id || raw.kb_number || raw.number || null;
-        const title =
-          raw.short_description || raw.title || raw.name || '(Untitled)';
 
         // Build HTML body from available fields, prefer text_html / wiki / text
         const rawHtml =
           raw.text_html || raw.wiki || raw.text ||
           raw.description || raw.body || raw.content || '';
 
-        // Parse into a DOM Document and run the shared ingestion pipeline.
-        // Pass normalizeServiceNowDoc as the source-specific cleanup callback.
+        // Parse into a DOM Document so resolveArticleTitle can inspect h1/content
         const parser = new DOMParser();
         const doc = parser.parseFromString(rawHtml || '', 'text/html');
+
+        // Resolve the best available title using the priority chain.
+        // raw fields take priority; doc content provides a fallback when all
+        // API title fields are absent or contain only a section heading.
+        const { title, originalTitle, titleSource } = this.resolveArticleTitle(raw, doc, null);
 
         const { steps, parserMeta, normalizedArticle } = Ingestion.ingest(
           doc,
@@ -2594,10 +2767,14 @@ const Articles = {
           ...new Set([...normalizedArticle.tags, ...snTags])
         ];
 
+        console.log(`[Stepper] Article imported (servicenow): title="${title}" | titleSource=${titleSource} | steps=${steps.length}`);
+
         const article = {
           // Stable ID: reuse existing record if present, else create new UUID
           id: null,           // resolved below during upsert
           title,
+          originalTitle,
+          titleSource,
           summary: raw.meta_description || raw.description || '',
           introHtml:       normalizedArticle.introHtml       || '',
           relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
