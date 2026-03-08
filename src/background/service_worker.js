@@ -259,92 +259,37 @@ async function handleTestServiceNow(snSettings) {
 
 /**
  * Core ServiceNow sync logic.
- * Phase 1: fetches the article index (metadata).
- * Phase 2: for each index article that lacks a full body, fetches the full detail.
- * Phase 3: validates body content, then runs the shared ingestion pipeline.
+ * Fetches the article list from the configured endpoint and stores all returned
+ * records directly – no per-article detail fetching.
  * @param {Object} sn - ServiceNow settings block
- * @returns {Promise<Object>} { success, count, message, indexCount, fetchedCount, skippedCount, parsedCount }
+ * @returns {Promise<Object>} { success, count, message }
  */
 async function runServiceNowSync(sn) {
   const syncedAt = new Date().toISOString();
   try {
-    // ── Phase 1: fetch article index ────────────────────────────────────────
-    const indexArticles = await fetchServiceNowArticleIndex(sn);
+    // Fetch article list from the configured endpoint
+    const articles = await fetchServiceNowArticleIndex(sn);
 
-    console.log(`[ServiceNow] Index fetch complete: ${indexArticles.length} articles`);
-    if (indexArticles.length > 0) {
-      console.log(`[ServiceNow] Index article fields: ${Object.keys(indexArticles[0]).join(', ')}`);
+    console.log(`[ServiceNow] List fetch complete: ${articles.length} articles`);
+
+    if (!articles || articles.length === 0) {
+      const message = 'No matching articles found for current filter';
+      await persistServiceNowSyncMeta(sn, null, message, 0);
+      return { success: false, count: 0, message };
     }
 
-    if (!indexArticles || indexArticles.length === 0) {
-      const result = {
-        success: false,
-        count: 0,
-        message: 'No matching articles found for current filter',
-        indexCount: 0, fetchedCount: 0, skippedCount: 0, parsedCount: 0
-      };
-      await persistServiceNowSyncMeta(sn, null, result.message, 0,
-        { indexCount: 0, fetchedCount: 0, skippedCount: 0, parsedCount: 0 });
-      return result;
-    }
-
-    // ── Phase 2: enrich each article with full body content ──────────────────
-    // Best-effort mode: always include every article regardless of body length.
-    // Articles with short/missing bodies are stored with parseStatus='missing_content'
-    // so they can still be searched and opened.
-    const fullArticles = [];
-    let partialBodyCount = 0;
-
-    for (const indexArticle of indexArticles) {
-      if (hasFullBody(indexArticle)) {
-        // List response already included the full body – use it directly
-        const { value: idxBody, field: idxBodyField } = detectBodyField(indexArticle);
-        console.log(
-          `[ServiceNow] Article "${indexArticle.short_description || indexArticle.sys_id}" ` +
-          `has body in index response | bodyField=${idxBodyField} | bodyLen=${idxBody.trim().length}`
-        );
-        fullArticles.push(indexArticle);
-      } else {
-        // Attempt to fetch the full article record; use whatever we get back.
-        const detail = await fetchServiceNowArticleDetail(indexArticle, sn);
-        const merged = detail ? { ...indexArticle, ...detail } : indexArticle;
-        if (!hasFullBody(merged)) {
-          const title = indexArticle.short_description || indexArticle.sys_id || '(unknown)';
-          console.warn(
-            `[ServiceNow] Article "${title}": body content short/missing – stored with best-effort parsing`
-          );
-          partialBodyCount++;
-        }
-        fullArticles.push(merged);
-      }
-    }
-
-    console.log(
-      `[ServiceNow] Articles ready: ${fullArticles.length}` +
-      (partialBodyCount > 0 ? ` (${partialBodyCount} with partial/missing body)` : '')
-    );
-
-    // ── Phase 3: import / upsert articles ────────────────────────────────────
-    const { upserted, stale, errors } = await ingestServiceNowArticles(fullArticles, syncedAt);
+    // Store all returned records directly
+    const { upserted, stale, errors } = await ingestServiceNowArticles(articles, syncedAt);
 
     const message =
       `Synced ${upserted} ServiceNow article(s)` +
-      ` (${indexArticles.length} found` +
-      (partialBodyCount > 0 ? `, ${partialBodyCount} partial` : '') +
-      `)` +
+      ` (${articles.length} returned)` +
       (stale > 0 ? ` · ${stale} marked stale` : '') +
       (errors.length > 0 ? ` · ${errors.length} error(s)` : '');
 
-    const syncStats = {
-      indexCount:    indexArticles.length,
-      fetchedCount:  fullArticles.length,
-      partialCount:  partialBodyCount,
-      parsedCount:   upserted
-    };
+    await persistServiceNowSyncMeta(sn, syncedAt, null, upserted);
 
-    await persistServiceNowSyncMeta(sn, syncedAt, null, upserted, syncStats);
-
-    return { success: true, count: upserted, message, ...syncStats };
+    return { success: true, count: upserted, message };
   } catch (err) {
     const errorMsg = classifyNetworkError(err);
     await persistServiceNowSyncMeta(sn, null, errorMsg, 0);
@@ -353,15 +298,14 @@ async function runServiceNowSync(sn) {
 }
 
 /**
- * Persist sync metadata (lastSyncAt, lastError, articleCount, syncStats) back to storage.
+ * Persist sync metadata (lastSyncAt, lastError, articleCount) back to storage.
  * Does a shallow merge so other settings fields are preserved.
  * @param {Object}      sn           - ServiceNow settings block
  * @param {string|null} lastSyncAt   - ISO timestamp of this sync (null on failure)
  * @param {string|null} lastError    - Error message (null on success)
  * @param {number}      articleCount - Number of articles upserted
- * @param {Object}      [syncStats]  - Optional detailed stats: { indexCount, fetchedCount, skippedCount, parsedCount }
  */
-async function persistServiceNowSyncMeta(sn, lastSyncAt, lastError, articleCount, syncStats) {
+async function persistServiceNowSyncMeta(sn, lastSyncAt, lastError, articleCount) {
   try {
     const { settings } = await chrome.storage.local.get('settings');
     const updated = {
@@ -371,8 +315,7 @@ async function persistServiceNowSyncMeta(sn, lastSyncAt, lastError, articleCount
         ...(settings?.serviceNow || {}),
         lastSyncAt: lastSyncAt || sn.lastSyncAt,
         lastError: lastError || null,
-        articleCount,
-        ...(syncStats ? { syncStats } : {})
+        articleCount
       }
     };
     await chrome.storage.local.set({ settings: updated });
@@ -382,11 +325,7 @@ async function persistServiceNowSyncMeta(sn, lastSyncAt, lastError, articleCount
 }
 
 /**
- * Fetch all ServiceNow Knowledge articles (index / metadata), following pagination.
- *
- * This function retrieves the article list only – it does NOT guarantee that
- * a full HTML body is present on each returned object.  Call
- * fetchServiceNowArticleDetail() for articles that lack a full body.
+ * Fetch all ServiceNow Knowledge articles, following pagination.
  *
  * Supports three response shapes defensively:
  *   • Array directly
@@ -394,7 +333,7 @@ async function persistServiceNowSyncMeta(sn, lastSyncAt, lastError, articleCount
  *   • { result: { articles: [...] } }
  *
  * @param {Object} sn - ServiceNow settings
- * @returns {Promise<Array>} Flat array of raw article index objects
+ * @returns {Promise<Array>} Flat array of raw article objects
  */
 async function fetchServiceNowArticleIndex(sn) {
   const PAGE_SIZE = 100;
@@ -455,13 +394,6 @@ async function fetchServiceNowArticleIndex(sn) {
   return allArticles;
 }
 
-/**
- * Explicit field list requested from the ServiceNow API.
- * Requesting these fields by name ensures the list endpoint returns body
- * content even when the default response omits large text fields.
- */
-const SN_BODY_FIELDS =
-  'sys_id,number,short_description,text,description,article,body,content,sys_updated_on';
 
 /**
  * Extract the clean base URL (origin + pathname only) from a stored base URL,
@@ -484,8 +416,6 @@ function getCleanBaseUrl(baseUrl) {
 
 /**
  * Build a ServiceNow Knowledge API URL with pagination parameters.
- * Includes an explicit sysparm_fields list so the list endpoint returns full
- * body/content fields alongside the normal metadata.
  *
  * Only the origin and pathname of baseUrl are used; any query parameters
  * present in the stored value are discarded so that all query parameters are
@@ -503,7 +433,6 @@ function buildServiceNowUrl(baseUrl, filter, limit, offset) {
   // accepts a plain base endpoint and all query parameters are built here.
   const url = new URL(getCleanBaseUrl(baseUrl));
   if (filter) url.searchParams.set('sysparm_query', filter);
-  url.searchParams.set('sysparm_fields', SN_BODY_FIELDS);
   url.searchParams.set('sysparm_limit', String(limit));
   url.searchParams.set('sysparm_offset', String(offset));
   console.log('ServiceNow API URL:', url.toString());
@@ -544,36 +473,7 @@ function extractArticlesFromPayload(data) {
 }
 
 /**
- * Extract a single article object from a ServiceNow detail endpoint response.
- * Handles the most common shapes returned by /articles/{id} endpoints:
- *   • { result: {...} }         – single-object result (most common)
- *   • { result: [{...}] }       – single-element array result
- *   • { sys_id: ..., ... }      – bare object (no wrapper)
- * @param {*} data - Parsed JSON payload from a detail request
- * @returns {Object|null}
- */
-function extractArticleDetailFromPayload(data) {
-  if (!data || typeof data !== 'object') return null;
-  if (data.result) {
-    if (!Array.isArray(data.result) && typeof data.result === 'object') return data.result;
-    if (Array.isArray(data.result) && data.result.length > 0) return data.result[0];
-  }
-  // Bare object: check for a field that only a real article would have
-  if (data.sys_id || data.number || data.short_description) return data;
-  return null;
-}
-
-/**
- * Minimum body length (characters) required to consider an article "complete".
- * Responses shorter than this are treated as metadata-only and trigger a detail fetch.
- */
-const BODY_MIN_LENGTH = 200;
-
-/**
  * Ordered list of field names that may contain the article's full HTML/text body.
- * The fields explicitly requested via SN_BODY_FIELDS are included here, along with
- * legacy field names (text_html, wiki) that some ServiceNow instances return by
- * default even without explicit field selection.
  */
 const BODY_FIELD_CANDIDATES = [
   'text_html', 'wiki', 'article', 'text', 'description', 'body', 'content'
@@ -606,132 +506,6 @@ function extractBodyField(article) {
 }
 
 /**
- * Return true when a raw ServiceNow article object already contains a
- * sufficiently long body/content field.
- * @param {Object} article - Raw article record
- * @returns {boolean}
- */
-function hasFullBody(article) {
-  return extractBodyField(article).trim().length >= BODY_MIN_LENGTH;
-}
-
-/**
- * Fetch the full detail record for a single ServiceNow article.
- *
- * Identifier resolution order:
- *   1. `sys_id` appended to sn.baseUrl (preferred – deterministic & stable)
- *   2. `link` / `url` field on the index article (direct REST URL)
- *   3. `number` or `kb_number` appended to sn.baseUrl (fallback)
- *
- * The detail URL always includes sysparm_fields so that the response contains
- * all likely body fields regardless of the API's default field set.
- *
- * Returns null on any failure so the caller can mark the article as skipped.
- *
- * @param {Object} articleRef - Index article record (may be metadata-only)
- * @param {Object} sn         - ServiceNow settings (baseUrl, username, password)
- * @returns {Promise<Object|null>} Full article record or null
- */
-async function fetchServiceNowArticleDetail(articleRef, sn) {
-  const title = articleRef.short_description || articleRef.title || articleRef.name || '(unknown)';
-
-  // ── Build detail URL ──────────────────────────────────────────────────────
-  let detailUrl = null;
-  let identifier = null;
-
-  // Prefer sys_id for the detail request – it is stable and unambiguous
-  if (articleRef.sys_id && typeof articleRef.sys_id === 'string') {
-    identifier = articleRef.sys_id;
-    const cleanBase = getCleanBaseUrl(sn.baseUrl).replace(/\/+$/, '');
-    const u = new URL(`${cleanBase}/${encodeURIComponent(identifier)}`);
-    u.searchParams.set('sysparm_fields', SN_BODY_FIELDS);
-    detailUrl = u.toString();
-  } else if (articleRef.link && typeof articleRef.link === 'string') {
-    identifier = articleRef.link;
-    const u = new URL(articleRef.link);
-    u.searchParams.set('sysparm_fields', SN_BODY_FIELDS);
-    detailUrl = u.toString();
-  } else if (articleRef.url && typeof articleRef.url === 'string') {
-    identifier = articleRef.url;
-    const u = new URL(articleRef.url);
-    u.searchParams.set('sysparm_fields', SN_BODY_FIELDS);
-    detailUrl = u.toString();
-  } else {
-    identifier = articleRef.number || articleRef.kb_number || null;
-    if (!identifier) {
-      console.warn(
-        `[ServiceNow Detail] No identifier found for "${title}"; ` +
-        `available fields: ${Object.keys(articleRef).join(', ')}`
-      );
-      return null;
-    }
-    const cleanBase = getCleanBaseUrl(sn.baseUrl).replace(/\/+$/, '');
-    const u = new URL(`${cleanBase}/${encodeURIComponent(identifier)}`);
-    u.searchParams.set('sysparm_fields', SN_BODY_FIELDS);
-    detailUrl = u.toString();
-  }
-
-  console.log(
-    `[ServiceNow Detail] Fetching: title="${title}" | identifier=${identifier}`
-  );
-
-  // ── HTTP request ──────────────────────────────────────────────────────────
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-  let response;
-  try {
-    response = await fetch(detailUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Authorization': buildBasicAuthHeader(sn.username, sn.password)
-      },
-      signal: controller.signal
-    });
-  } catch (err) {
-    clearTimeout(timeoutId);
-    console.warn(`[ServiceNow Detail] Network error for "${title}": ${err.message}`);
-    return null;
-  }
-  clearTimeout(timeoutId);
-
-  if (!response.ok) {
-    console.warn(
-      `[ServiceNow Detail] HTTP ${response.status} for "${title}" (${detailUrl})`
-    );
-    return null;
-  }
-
-  let data;
-  try {
-    data = await response.json();
-  } catch {
-    console.warn(`[ServiceNow Detail] JSON parse error for "${title}"`);
-    return null;
-  }
-
-  // ── Extract article from response ─────────────────────────────────────────
-  const detail = extractArticleDetailFromPayload(data);
-  if (!detail) {
-    console.warn(
-      `[ServiceNow Detail] Could not extract article object from response for "${title}"`
-    );
-    return null;
-  }
-
-  const { value: body, field: bodyField } = detectBodyField(detail);
-  const bodyLen = body.trim().length;
-
-  console.log(
-    `[ServiceNow Detail] title="${title}" | bodyField=${bodyField || 'none'} | ` +
-    `bodyLen=${bodyLen} | bodyPresent=${bodyLen >= BODY_MIN_LENGTH}`
-  );
-
-  return detail;
-}
-
-/**
  * Map and store raw ServiceNow articles.
  * Replicates the logic of Articles.importServiceNowArticles() for use in the
  * service worker (which cannot import the articles.js module).
@@ -744,7 +518,6 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
   const errors = [];
   const processed = [];
   const syncedRemoteIds = new Set();
-  let missingBodyCount = 0;
 
   for (const raw of rawArticles) {
     try {
@@ -790,15 +563,6 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
         steps.length > 1  ? 'parsed_structured' :
         rawBodyLength > 0 ? 'parsed_fallback'   : 'missing_content';
 
-      if (rawBodyLength === 0) missingBodyCount++;
-
-      // Debug logging (mirrors Articles.logStepInfo() format for uploaded articles)
-      console.log(
-        `[Stepper] Article imported (servicenow-sw): title="${title}" | titleSource=${titleSource} | bodyField=${bodyField || 'none'} | bodyLen=${rawBodyLength} | ` +
-        `parseStatus=${parseStatus} | steps=${steps.length}` +
-        (steps.length > 0 ? ` | titles: ${steps.map(s => s.title).join(' | ')}` : '')
-      );
-
       const summary = raw.meta_description || raw.description || '';
       const tags = raw.kb_category
         ? [raw.kb_category]
@@ -835,11 +599,7 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
     }
   }
 
-  if (missingBodyCount > 0) {
-    console.warn(
-      `[ServiceNow Import] ${missingBodyCount} of ${processed.length} article(s) have no body content`
-    );
-  }
+  console.log(`[ServiceNow] Records stored: ${rawArticles.length} returned, processing complete`);
 
   // Load existing articles
   const { articles: allArticles } = await chrome.storage.local.get('articles');
