@@ -8,7 +8,7 @@
 // These values are merged with any stored settings at runtime so that
 // newly added fields always have a safe fallback.
 //
-//   baseUrl  : ServiceNow Knowledge Management REST API endpoint
+//   baseUrl  : ServiceNow Table API endpoint for kb_knowledge records
 //   filter   : sysparm_query filter (URL-encoded when building the request)
 //   username : Basic-auth username  ← rotate here
 //   password : Basic-auth password  ← rotate here (never logged)
@@ -16,8 +16,8 @@
 function getDefaultServiceNowSettings() {
   return {
     enabled: true,
-    baseUrl: 'https://nets.service-now.com/api/sn_km_api/knowledge/articles',
-    filter: 'workflow_state=published^sys_view_count>100',
+    baseUrl: 'https://nets.service-now.com/api/now/table/kb_knowledge',
+    filter: 'workflow_state=published',
     username: 'Co-Pilot',
     password: 'ejSHm*ScWIfV576@Z90rOoqF4wofHMX#mVOC|YSn',
     autoSyncWeekly: true,
@@ -28,8 +28,9 @@ function getDefaultServiceNowSettings() {
 }
 
 /**
- * Migrate any leftover placeholder tokens from an older installation.
- * Only replaces the exact placeholder strings; all other values are left untouched.
+ * Migrate any leftover placeholder tokens or legacy values from an older installation.
+ * Only replaces the exact placeholder strings or the legacy sn_km_api endpoint;
+ * all other values are left untouched.
  * @param {Object} sn - Merged serviceNow settings object
  * @returns {Object} Settings with placeholders replaced by real defaults
  */
@@ -42,6 +43,13 @@ function migrateServiceNowPlaceholders(sn) {
   }
   if (migrated.password === '__SERVICENOW_PASSWORD__') {
     migrated.password = realDefaults.password;
+  }
+  // Migrate legacy sn_km_api endpoint to the Table API endpoint
+  if (
+    migrated.baseUrl &&
+    migrated.baseUrl.includes('/api/sn_km_api/knowledge/articles')
+  ) {
+    migrated.baseUrl = realDefaults.baseUrl;
   }
   return migrated;
 }
@@ -76,15 +84,17 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     console.log('ServiceNow settings initialized for existing installation');
   } else {
     // Existing installation with serviceNow settings – migrate any placeholder tokens
+    // or legacy endpoint URLs (e.g. sn_km_api → now/table/kb_knowledge)
     const migrated = migrateServiceNowPlaceholders(settings.serviceNow);
     if (
       migrated.username !== settings.serviceNow.username ||
-      migrated.password !== settings.serviceNow.password
+      migrated.password !== settings.serviceNow.password ||
+      migrated.baseUrl  !== settings.serviceNow.baseUrl
     ) {
       await chrome.storage.local.set({
         settings: { ...settings, serviceNow: migrated }
       });
-      console.log('ServiceNow placeholder credentials migrated to real defaults');
+      console.log('ServiceNow settings migrated to real defaults');
     }
   }
   
@@ -415,7 +425,16 @@ function getCleanBaseUrl(baseUrl) {
 }
 
 /**
- * Build a ServiceNow Knowledge API URL with pagination parameters.
+ * Fields to request from the ServiceNow Table API.
+ * Explicitly listing only the fields we need reduces payload size and avoids
+ * ACL issues on fields the integration account cannot read.
+ * Both sys_updated_on and sys_created_on are included so that article
+ * timestamps are preserved accurately (createdAt falls back to syncedAt when absent).
+ */
+const SN_TABLE_FIELDS = 'sys_id,number,short_description,text,kb_knowledge_base,sys_updated_on,sys_created_on';
+
+/**
+ * Build a ServiceNow Table API URL with pagination parameters.
  *
  * Only the origin and pathname of baseUrl are used; any query parameters
  * present in the stored value are discarded so that all query parameters are
@@ -433,6 +452,7 @@ function buildServiceNowUrl(baseUrl, filter, limit, offset) {
   // accepts a plain base endpoint and all query parameters are built here.
   const url = new URL(getCleanBaseUrl(baseUrl));
   if (filter) url.searchParams.set('sysparm_query', filter);
+  url.searchParams.set('sysparm_fields', SN_TABLE_FIELDS);
   url.searchParams.set('sysparm_limit', String(limit));
   url.searchParams.set('sysparm_offset', String(offset));
   console.log('ServiceNow API URL:', url.toString());
@@ -474,9 +494,11 @@ function extractArticlesFromPayload(data) {
 
 /**
  * Ordered list of field names that may contain the article's full HTML/text body.
+ * The Table API (`kb_knowledge`) returns the full body in `text`; other names are
+ * kept as fallbacks for older or alternative endpoint shapes.
  */
 const BODY_FIELD_CANDIDATES = [
-  'text_html', 'wiki', 'article', 'text', 'description', 'body', 'content'
+  'text', 'text_html', 'wiki', 'article', 'description', 'body', 'content'
 ];
 
 /**
@@ -510,6 +532,10 @@ function extractBodyField(article) {
  * Replicates the logic of Articles.importServiceNowArticles() for use in the
  * service worker (which cannot import the articles.js module).
  *
+ * Body validation: an article is skipped (not stored) when its body is absent,
+ * shorter than 200 characters, or contains no HTML markup — these records carry
+ * only metadata and would produce empty step cards.
+ *
  * @param {Array}  rawArticles
  * @param {string} syncedAt    ISO timestamp
  * @returns {Promise<{upserted:number, stale:number, errors:string[]}>}
@@ -518,6 +544,11 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
   const errors = [];
   const processed = [];
   const syncedRemoteIds = new Set();
+
+  let articlesWithBody = 0;
+  let articlesSkipped = 0;
+  let totalBodyLength = 0;
+  const stepCounts = [];
 
   for (const raw of rawArticles) {
     try {
@@ -552,11 +583,28 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
       const { value: rawHtml, field: bodyField } = detectBodyField(raw);
       const rawBodyLength = rawHtml.trim().length;
 
+      // ── Body validation ────────────────────────────────────────────────────
+      // Articles that have no body, a very short body, or no HTML markup are
+      // metadata-only records; storing them would produce empty step cards.
+      const bodyHasHtml = /<\w[^>]*>/.test(rawHtml);
+      if (!rawHtml || rawBodyLength <= 200 || !bodyHasHtml) {
+        articlesSkipped++;
+        errors.push(
+          `Skipped "${title}" (${raw.sys_id || raw.number || 'unknown'}): missing body` +
+          (!rawHtml ? '' : ` (length=${rawBodyLength}, hasHtml=${bodyHasHtml})`)
+        );
+        continue;
+      }
+
+      articlesWithBody++;
+      totalBodyLength += rawBodyLength;
+
       // Basic HTML sanitization (removes script/iframe/object/embed)
       const safeHtml = sanitizeHtml(rawHtml);
 
       // Segment HTML body into steps using the shared pipeline
       const steps = segmentHtmlIntoSteps(safeHtml, title);
+      stepCounts.push(steps.length);
 
       // Determine parse status for storage / debugging
       const parseStatus =
@@ -573,6 +621,7 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
         title,
         originalTitle,
         titleSource,
+        number: raw.number || null,
         summary,
         introHtml: '',
         relatedInfoHtml: '',
@@ -599,7 +648,18 @@ async function ingestServiceNowArticles(rawArticles, syncedAt) {
     }
   }
 
-  console.log(`[ServiceNow] Records stored: ${rawArticles.length} returned, processing complete`);
+  // ── Debug summary ────────────────────────────────────────────────────────
+  const avgBodyLength = articlesWithBody > 0
+    ? Math.round(totalBodyLength / articlesWithBody)
+    : 0;
+  const avgSteps = stepCounts.length > 0
+    ? (stepCounts.reduce((a, b) => a + b, 0) / stepCounts.length).toFixed(1)
+    : 0;
+  console.log(`[ServiceNow] Fetched ${rawArticles.length} ServiceNow articles`);
+  console.log(`[ServiceNow] ${articlesWithBody} contained body content`);
+  console.log(`[ServiceNow] ${articlesSkipped} skipped due to missing text`);
+  console.log(`[ServiceNow] Average body length: ${avgBodyLength} chars`);
+  console.log(`[ServiceNow] Average steps detected per article: ${avgSteps}`);
 
   // Load existing articles
   const { articles: allArticles } = await chrome.storage.local.get('articles');
@@ -998,7 +1058,7 @@ function htmlToPlainText(html) {
 
 function classifyHttpError(status) {
   if (status === 401 || status === 403) return 'Authentication failed: check username and password';
-  if (status === 404) return 'Knowledge API endpoint not found: verify Base URL and that the sn_km_api plugin is enabled';
+  if (status === 404) return 'Knowledge API endpoint not found: verify Base URL points to /api/now/table/kb_knowledge and the Table API is accessible';
   return `HTTP ${status}: request failed`;
 }
 

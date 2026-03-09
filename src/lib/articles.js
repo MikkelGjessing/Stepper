@@ -3039,19 +3039,42 @@ const Articles = {
     const processed = [];
     const syncedRemoteIds = new Set();
 
+    let articlesWithBody = 0;
+    let articlesSkipped = 0;
+    let totalBodyLength = 0;
+    const stepCounts = [];
+
     for (const raw of rawArticles) {
       try {
         // Resolve the best available identifier
         const remoteId = raw.sys_id || raw.kb_number || raw.number || null;
 
-        // Build HTML body from available fields, prefer text_html / wiki / text
+        // Build HTML body from available fields – Table API returns full body in `text`
         const rawHtml =
-          raw.text_html || raw.wiki || raw.text ||
+          raw.text || raw.text_html || raw.wiki || raw.article ||
           raw.description || raw.body || raw.content || '';
+
+        const rawBodyLength = rawHtml.trim().length;
+
+        // ── Body validation ──────────────────────────────────────────────────
+        // Articles without a meaningful HTML body are metadata-only records;
+        // skip them so they don't produce empty step cards in the UI.
+        const bodyHasHtml = /<\w[^>]*>/.test(rawHtml);
+        if (!rawHtml || rawBodyLength <= 200 || !bodyHasHtml) {
+          articlesSkipped++;
+          errors.push(
+            `Skipped "${raw.short_description || raw.sys_id}" (${remoteId || 'unknown'}): missing body` +
+            (!rawHtml ? '' : ` (length=${rawBodyLength}, hasHtml=${bodyHasHtml})`)
+          );
+          continue;
+        }
+
+        articlesWithBody++;
+        totalBodyLength += rawBodyLength;
 
         // Parse into a DOM Document so resolveArticleTitle can inspect h1/content
         const parser = new DOMParser();
-        const doc = parser.parseFromString(rawHtml || '', 'text/html');
+        const doc = parser.parseFromString(rawHtml, 'text/html');
 
         // Resolve the best available title using the priority chain.
         // raw fields take priority; doc content provides a fallback when all
@@ -3066,6 +3089,8 @@ const Articles = {
           (d) => this.normalizeServiceNowDoc(d)
         );
 
+        stepCounts.push(steps.length);
+
         // Merge tags: tags extracted by normalizer + explicit category/topic fields
         const snTags = raw.kb_category
           ? [raw.kb_category]
@@ -3075,7 +3100,6 @@ const Articles = {
         ];
 
         // Determine parse status (best-effort; never blocks storage)
-        const rawBodyLength = rawHtml.trim().length;
         const parseStatus =
           parserMeta && parserMeta.parserName !== 'fallbackSingleStepParser'
             ? 'parsed_structured'
@@ -3093,6 +3117,7 @@ const Articles = {
           originalTitleCandidate,
           titleSource,
           titleCandidates,
+          number: raw.number || null,
           summary: raw.meta_description || raw.description || '',
           introHtml:       normalizedArticle.introHtml       || '',
           relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
@@ -3104,6 +3129,7 @@ const Articles = {
           source: 'servicenow',
           remoteId,
           syncedAt,
+          rawBodyLength,
           stale: false,
           createdAt: raw.sys_created_on || syncedAt,
           updatedAt: syncedAt
@@ -3116,6 +3142,19 @@ const Articles = {
         errors.push(`Failed to process article "${raw.short_description || raw.sys_id}": ${err.message}`);
       }
     }
+
+    // ── Debug summary ──────────────────────────────────────────────────────
+    const avgBodyLength = articlesWithBody > 0
+      ? Math.round(totalBodyLength / articlesWithBody)
+      : 0;
+    const avgSteps = stepCounts.length > 0
+      ? (stepCounts.reduce((a, b) => a + b, 0) / stepCounts.length).toFixed(1)
+      : 0;
+    console.log(`[ServiceNow] Fetched ${rawArticles.length} ServiceNow articles`);
+    console.log(`[ServiceNow] ${articlesWithBody} contained body content`);
+    console.log(`[ServiceNow] ${articlesSkipped} skipped due to missing text`);
+    console.log(`[ServiceNow] Average body length: ${avgBodyLength} chars`);
+    console.log(`[ServiceNow] Average steps detected per article: ${avgSteps}`);
 
     // Load existing articles from storage
     const allArticles = await Storage.getArticles();
