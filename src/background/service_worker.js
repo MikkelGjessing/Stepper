@@ -8,16 +8,16 @@
 // These values are merged with any stored settings at runtime so that
 // newly added fields always have a safe fallback.
 //
-//   baseUrl  : ServiceNow Table API endpoint for kb_knowledge records
-//   filter   : sysparm_query filter (URL-encoded when building the request)
+//   baseUrl  : ServiceNow Knowledge Management API endpoint
+//   filter   : sysparm_query filter (appended as ?sysparm_query=<filter>)
 //   username : Basic-auth username  ← rotate here
 //   password : Basic-auth password  ← rotate here (never logged)
 // ─────────────────────────────────────────────────────────────────────────────
 function getDefaultServiceNowSettings() {
   return {
     enabled: true,
-    baseUrl: 'https://nets.service-now.com/api/now/table/kb_knowledge',
-    filter: 'workflow_state=published',
+    baseUrl: 'https://nets.service-now.com/api/sn_km_api/knowledge/articles',
+    filter: 'workflow_state=published^sys_view_count>100',
     username: 'Co-Pilot',
     password: 'ejSHm*ScWIfV576@Z90rOoqF4wofHMX#mVOC|YSn',
     autoSyncWeekly: true,
@@ -29,7 +29,7 @@ function getDefaultServiceNowSettings() {
 
 /**
  * Migrate any leftover placeholder tokens or legacy values from an older installation.
- * Only replaces the exact placeholder strings or the legacy sn_km_api endpoint;
+ * Only replaces the exact placeholder strings or the Table API endpoint;
  * all other values are left untouched.
  * @param {Object} sn - Merged serviceNow settings object
  * @returns {Object} Settings with placeholders replaced by real defaults
@@ -44,10 +44,10 @@ function migrateServiceNowPlaceholders(sn) {
   if (migrated.password === '__SERVICENOW_PASSWORD__') {
     migrated.password = realDefaults.password;
   }
-  // Migrate legacy sn_km_api endpoint to the Table API endpoint
+  // Migrate Table API endpoint back to the original Knowledge Management API endpoint
   if (
     migrated.baseUrl &&
-    migrated.baseUrl.includes('/api/sn_km_api/knowledge/articles')
+    migrated.baseUrl.includes('/api/now/table/kb_knowledge')
   ) {
     migrated.baseUrl = realDefaults.baseUrl;
   }
@@ -84,7 +84,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     console.log('ServiceNow settings initialized for existing installation');
   } else {
     // Existing installation with serviceNow settings – migrate any placeholder tokens
-    // or legacy endpoint URLs (e.g. sn_km_api → now/table/kb_knowledge)
+    // or legacy endpoint URLs (e.g. table/kb_knowledge → sn_km_api)
     const migrated = migrateServiceNowPlaceholders(settings.serviceNow);
     if (
       migrated.username !== settings.serviceNow.username ||
@@ -244,7 +244,7 @@ async function handleTestServiceNow(snSettings) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-    // Use sys_user with limit=1 to verify credentials independently of kb_knowledge ACLs
+    // Use sys_user with limit=1 to verify credentials against the ServiceNow instance
     const origin = new URL(getCleanBaseUrl(sn.baseUrl)).origin;
     const testUrl = new URL('/api/now/table/sys_user', origin);
     testUrl.searchParams.set('sysparm_limit', '1');
@@ -341,7 +341,7 @@ async function persistServiceNowSyncMeta(sn, lastSyncAt, lastError, articleCount
 }
 
 /**
- * Fetch all ServiceNow Knowledge articles, following pagination.
+ * Fetch ServiceNow Knowledge articles in a single request.
  *
  * Supports three response shapes defensively:
  *   • Array directly
@@ -352,64 +352,41 @@ async function persistServiceNowSyncMeta(sn, lastSyncAt, lastError, articleCount
  * @returns {Promise<Array>} Flat array of raw article objects
  */
 async function fetchServiceNowArticleIndex(sn) {
-  const PAGE_SIZE = 100;
-  let offset = 0;
-  const allArticles = [];
+  const url = buildServiceNowUrl(sn.baseUrl, sn.filter);
 
-  // Safety guard: max pages to avoid infinite loops on misconfigured APIs.
-  // At PAGE_SIZE=100 this caps fetches at 5 000 articles per sync.
-  // If your ServiceNow instance has more matching articles, increase MAX_PAGES
-  // or narrow the sysparm_query filter.
-  const MAX_PAGES = 50;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const url = buildServiceNowUrl(sn.baseUrl, sn.filter, PAGE_SIZE, offset);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-    let response;
-    try {
-      // NOTE: Authorization header is intentionally not logged
-      response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Authorization': buildBasicAuthHeader(sn.username, sn.password)
-        },
-        signal: controller.signal
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    if (!response.ok) {
-      const responseBody = await response.text().catch(() => '');
-      console.error('ServiceNow API error', { status: response.status, responseBody });
-      throw new Error(classifyHttpError(response.status));
-    }
-
-    let data;
-    try {
-      data = await response.json();
-    } catch {
-      throw new Error('Unexpected API response: could not parse JSON');
-    }
-
-    // Defensive adapter: handle all known payload shapes
-    const page_articles = extractArticlesFromPayload(data);
-
-    if (!page_articles || page_articles.length === 0) break;
-
-    allArticles.push(...page_articles);
-
-    // Stop if we got fewer results than the page size (last page)
-    if (page_articles.length < PAGE_SIZE) break;
-
-    offset += PAGE_SIZE;
+  let response;
+  try {
+    // NOTE: Authorization header is intentionally not logged
+    response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': buildBasicAuthHeader(sn.username, sn.password)
+      },
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  return allArticles;
+  if (!response.ok) {
+    const responseBody = await response.text().catch(() => '');
+    console.error('ServiceNow API error', { status: response.status, responseBody });
+    throw new Error(classifyHttpError(response.status));
+  }
+
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error('Unexpected API response: could not parse JSON');
+  }
+
+  // Defensive adapter: handle all known payload shapes
+  return extractArticlesFromPayload(data);
 }
 
 
@@ -433,16 +410,7 @@ function getCleanBaseUrl(baseUrl) {
 }
 
 /**
- * Fields to request from the ServiceNow Table API.
- * Explicitly listing only the fields we need reduces payload size and avoids
- * ACL issues on fields the integration account cannot read.
- * Both sys_updated_on and sys_created_on are included so that article
- * timestamps are preserved accurately (createdAt falls back to syncedAt when absent).
- */
-const SN_TABLE_FIELDS = 'sys_id,number,short_description,text,kb_knowledge_base,sys_updated_on,sys_created_on';
-
-/**
- * Build a ServiceNow Table API URL with pagination parameters.
+ * Build a ServiceNow Knowledge Management API URL.
  *
  * Only the origin and pathname of baseUrl are used; any query parameters
  * present in the stored value are discarded so that all query parameters are
@@ -451,18 +419,13 @@ const SN_TABLE_FIELDS = 'sys_id,number,short_description,text,kb_knowledge_base,
  *
  * @param {string} baseUrl - Base endpoint URL (only origin + pathname are used)
  * @param {string} filter  - raw sysparm_query value (not yet encoded)
- * @param {number} limit
- * @param {number} offset
  * @returns {string}
  */
-function buildServiceNowUrl(baseUrl, filter, limit, offset) {
+function buildServiceNowUrl(baseUrl, filter) {
   // Strip any query params from the stored base URL so that the URL field
   // accepts a plain base endpoint and all query parameters are built here.
   const url = new URL(getCleanBaseUrl(baseUrl));
   if (filter) url.searchParams.set('sysparm_query', filter);
-  url.searchParams.set('sysparm_fields', SN_TABLE_FIELDS);
-  url.searchParams.set('sysparm_limit', String(limit));
-  url.searchParams.set('sysparm_offset', String(offset));
   console.log('ServiceNow API URL:', url.toString());
   return url.toString();
 }
@@ -502,8 +465,8 @@ function extractArticlesFromPayload(data) {
 
 /**
  * Ordered list of field names that may contain the article's full HTML/text body.
- * The Table API (`kb_knowledge`) returns the full body in `text`; other names are
- * kept as fallbacks for older or alternative endpoint shapes.
+ * The Knowledge Management API (`sn_km_api`) returns the body in `text`; other
+ * names are kept as fallbacks for alternative endpoint shapes.
  */
 const BODY_FIELD_CANDIDATES = [
   'text', 'text_html', 'wiki', 'article', 'description', 'body', 'content'
@@ -1066,8 +1029,8 @@ function htmlToPlainText(html) {
 
 function classifyHttpError(status) {
   if (status === 401) return 'Invalid credentials: check username and password';
-  if (status === 403) return 'User lacks permission to read kb_knowledge table';
-  if (status === 404) return 'API endpoint not found: verify the Base URL and that the Table API is accessible';
+  if (status === 403) return 'User lacks permission to access ServiceNow Knowledge articles';
+  if (status === 404) return 'API endpoint not found: verify the Base URL is correct';
   return `HTTP ${status}: request failed`;
 }
 
