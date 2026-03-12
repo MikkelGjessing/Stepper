@@ -13,10 +13,8 @@
 
 'use strict';
 
-const fetch = (...args) =>
-  import('node-fetch').then(({ default: f }) => f(...args)).catch(() => {
-    return global.fetch(...args);
-  });
+// Use the built-in fetch available in Node 18+.
+const _fetch = globalThis.fetch;
 
 const LLM_ENDPOINT = process.env.LLM_ENDPOINT || 'https://api.openai.com/v1/chat/completions';
 const LLM_API_KEY = process.env.LLM_API_KEY || '';
@@ -87,7 +85,7 @@ async function callModel(sources, question) {
     max_tokens: 512
   };
 
-  const res = await fetch(LLM_ENDPOINT, {
+  const res = await _fetch(LLM_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -115,4 +113,11 @@ async function callModel(sources, question) {
   return answer.trim();
 }
 
-module.exports = { callModel };
+/**
+ * Fallback answer returned when no relevant content is found in the KB.
+ * Used by both the model layer (when retrieval returns empty) and the
+ * server (when an unexpected error prevents the model from answering).
+ */
+const NO_ANSWER_FALLBACK = "I couldn't find a reliable answer in the knowledge base.";
+
+module.exports = { callModel, NO_ANSWER_FALLBACK };

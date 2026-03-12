@@ -9,24 +9,27 @@
 
 'use strict';
 
-const fetch = (...args) =>
-  import('node-fetch').then(({ default: f }) => f(...args)).catch(() => {
-    // node-fetch is an optional peer-dep; fall back to the built-in fetch
-    // available in Node 18+.
-    return global.fetch(...args);
-  });
+// Use the built-in fetch available in Node 18+.
+// If running on an older Node version that ships node-fetch, it can be
+// required here; the built-in global is sufficient for Node >=18.
+const _fetch = globalThis.fetch;
 
 const SN_BASE_URL = process.env.SN_BASE_URL || '';
 const SN_USERNAME = process.env.SN_USERNAME || '';
 const SN_PASSWORD = process.env.SN_PASSWORD || '';
 
 /**
- * Escape a string for use in a ServiceNow sysparm_query value.
+ * Escape special characters in a string for safe inclusion in a ServiceNow
+ * sysparm_query value. Prevents query injection by stripping/replacing
+ * characters that have meaning in SN query syntax (^, %, NI, LIKE operators, etc.).
+ *
+ * We allow alphanumerics, spaces, hyphens and dots; everything else is stripped.
  * @param {string} str
  * @returns {string}
  */
 function escapeSnQuery(str) {
-  return String(str || '').replace(/['"\\]/g, '\\$&');
+  // Keep only characters that are safe in a LIKE/textLIKE operand value
+  return String(str || '').replace(/[^a-zA-Z0-9 \-_.]/g, '');
 }
 
 /**
@@ -53,7 +56,7 @@ async function searchServiceNow(query, limit = 5) {
   const authHeader =
     'Basic ' + Buffer.from(`${SN_USERNAME}:${SN_PASSWORD}`).toString('base64');
 
-  const res = await fetch(url, {
+  const res = await _fetch(url, {
     headers: { Authorization: authHeader, Accept: 'application/json' }
   });
 
@@ -130,7 +133,7 @@ async function retrieveForCurrentArticle(articleId, content, query) {
     'Basic ' + Buffer.from(`${SN_USERNAME}:${SN_PASSWORD}`).toString('base64');
 
   try {
-    const res = await fetch(url, {
+    const res = await _fetch(url, {
       headers: { Authorization: authHeader, Accept: 'application/json' }
     });
     if (!res.ok) return [];

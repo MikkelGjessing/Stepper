@@ -22,7 +22,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { retrieveForKB, retrieveForCurrentArticle } = require('./retrieval');
-const { callModel } = require('./model');
+const { callModel, NO_ANSWER_FALLBACK } = require('./model');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
@@ -137,7 +137,7 @@ app.post('/chat', async (req, res) => {
     // ── Generation ────────────────────────────────────────────────────────────
     let answer;
     if (sources.length === 0) {
-      answer = "I couldn't find a reliable answer in the knowledge base.";
+      answer = NO_ANSWER_FALLBACK;
     } else {
       answer = await callModel(sources, trimmedMessage);
     }

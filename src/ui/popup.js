@@ -433,7 +433,10 @@ async function handleChatSend() {
     appendChatResponse(response);
   } catch (err) {
     loadingEl.remove();
-    appendChatMessage('error', '⚠️ ' + (err.message || 'Something went wrong. Please try again.'));
+    // Limit displayed error to a safe maximum length to avoid rendering large server payloads
+    const rawMsg = (err && err.message) ? err.message : 'Something went wrong. Please try again.';
+    const safeMsg = rawMsg.length > 200 ? rawMsg.slice(0, 200) + '…' : rawMsg;
+    appendChatMessage('error', '⚠️ ' + safeMsg);
   } finally {
     chatLoading = false;
     if (chatSendBtn) chatSendBtn.disabled = false;
