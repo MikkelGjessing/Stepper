@@ -80,15 +80,12 @@
       </div>
     </div>
 
-    <!-- Footer (Sticky) -->
-    <footer class="footer">
-      <button class="footer-btn" id="refreshBtn">🔄 Refresh</button>
+    <!-- Footer (Sticky) – contains the Ask Stepper trigger; hidden when chat is disabled -->
+    <footer class="footer" id="mainFooter" style="display:none;">
+      <button class="footer-btn footer-btn-primary" id="chatTriggerBtn" aria-label="Open Ask Stepper chat">
+        💬 Ask Stepper
+      </button>
     </footer>
-
-    <!-- Chat Drawer Trigger Button (shown when enableChat is true) -->
-    <button class="chat-trigger-btn" id="chatTriggerBtn" style="display:none;" aria-label="Ask Stepper">
-      💬 Ask Stepper
-    </button>
 
     <!-- Chat Drawer -->
     <div class="chat-drawer" id="chatDrawer" aria-hidden="true">

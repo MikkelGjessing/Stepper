@@ -1407,39 +1407,31 @@ body {
   background: rgba(0, 0, 0, 0.85);
 }
 
-/* ── Chat Drawer ── */
-
-/* Trigger button fixed at bottom-right inside the container */
-.chat-trigger-btn {
-  position: absolute;
-  bottom: 56px; /* sit just above the sticky footer */
-  right: 12px;
-  z-index: 200;
-  padding: 8px 14px;
+/* ── Ask Stepper footer button (primary) ── */
+.footer-btn-primary {
   background: var(--nexi-blue);
   color: white;
   border: none;
-  border-radius: 20px;
-  font-size: 13px;
+  border-radius: 8px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-  transition: background 0.2s, transform 0.15s;
-  white-space: nowrap;
+  transition: background 0.2s;
 }
 
-.chat-trigger-btn:hover {
+.footer-btn-primary:hover {
   background: var(--nexi-blue-dark);
-  transform: translateY(-1px);
 }
 
-/* Drawer panel */
+/* ── Chat Drawer ── */
+
+/* Drawer panel – overlays the full container bottom */
 .chat-drawer {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  z-index: 300;
+  z-index: 300; /* above footer (z-index: 100) */
   background: white;
   border-top-left-radius: 14px;
   border-top-right-radius: 14px;
