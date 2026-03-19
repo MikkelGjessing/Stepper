@@ -84,6 +84,41 @@
     <footer class="footer">
       <button class="footer-btn" id="refreshBtn">🔄 Refresh</button>
     </footer>
+
+    <!-- Chat Drawer Trigger Button (shown when enableChat is true) -->
+    <button class="chat-trigger-btn" id="chatTriggerBtn" style="display:none;" aria-label="Ask Stepper">
+      💬 Ask Stepper
+    </button>
+
+    <!-- Chat Drawer -->
+    <div class="chat-drawer" id="chatDrawer" aria-hidden="true">
+      <div class="chat-drawer-header">
+        <div class="chat-drawer-header-left">
+          <span class="chat-drawer-title">Ask Stepper</span>
+          <span class="chat-context-label" id="chatContextLabel">Asking Stepper knowledge base</span>
+        </div>
+        <div class="chat-drawer-header-right">
+          <button class="chat-mode-switch" id="chatModeSwitch" style="display:none;"></button>
+          <button class="chat-drawer-resize" id="chatDrawerResize" title="Expand / Shrink" aria-label="Toggle drawer size">⤢</button>
+          <button class="chat-drawer-close" id="chatDrawerClose" title="Close chat" aria-label="Close chat">✕</button>
+        </div>
+      </div>
+
+      <div class="chat-messages" id="chatMessages" role="log" aria-live="polite">
+        <!-- Messages rendered by JS -->
+      </div>
+
+      <div class="chat-input-row">
+        <textarea
+          class="chat-input"
+          id="chatInput"
+          placeholder="Ask a question…"
+          rows="1"
+          aria-label="Chat message input"
+        ></textarea>
+        <button class="chat-send-btn" id="chatSendBtn" aria-label="Send message">➤</button>
+      </div>
+    </div>
   </div>
 
   <!-- Scripts -->

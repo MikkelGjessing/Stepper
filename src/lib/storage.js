@@ -156,6 +156,10 @@ const Storage = {
       llmApiKey: '',
       llmModel: 'gpt-3.5-turbo',
       enablePageScanning: false,
+      enableChat: false,
+      chatBackendUrl: '',
+      allowCurrentArticleChat: true,
+      allowKnowledgeBaseChat: true,
       serviceNow: defaultServiceNowSettings()
     };
     try {

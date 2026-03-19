@@ -49,6 +49,10 @@ const formFields = {
   enableDummyArticles: document.getElementById('enableDummyArticles'),
   enableLLMSearch: document.getElementById('enableLLMSearch'),
   enablePageScanning: document.getElementById('enablePageScanning'),
+  enableChat: document.getElementById('enableChat'),
+  chatBackendUrl: document.getElementById('chatBackendUrl'),
+  allowCurrentArticleChat: document.getElementById('allowCurrentArticleChat'),
+  allowKnowledgeBaseChat: document.getElementById('allowKnowledgeBaseChat'),
   llmEndpoint: document.getElementById('llmEndpoint'),
   llmApiKey: document.getElementById('llmApiKey'),
   llmModel: document.getElementById('llmModel')
@@ -72,6 +76,9 @@ function setupEventListeners() {
   
   // LLM toggle
   formFields.enableLLMSearch.addEventListener('change', toggleLLMSection);
+
+  // Chat toggle
+  formFields.enableChat.addEventListener('change', toggleChatFields);
 
   // ServiceNow toggle
   snEnabled.addEventListener('change', toggleSnFields);
@@ -124,6 +131,10 @@ async function loadSettings() {
     formFields.enableDummyArticles.checked = settings.enableDummyArticles !== false;
     formFields.enableLLMSearch.checked = settings.enableLLMSearch === true;
     formFields.enablePageScanning.checked = settings.enablePageScanning === true;
+    formFields.enableChat.checked = settings.enableChat === true;
+    formFields.chatBackendUrl.value = settings.chatBackendUrl || '';
+    formFields.allowCurrentArticleChat.checked = settings.allowCurrentArticleChat !== false;
+    formFields.allowKnowledgeBaseChat.checked = settings.allowKnowledgeBaseChat !== false;
     formFields.llmEndpoint.value = settings.llmEndpoint || '';
     formFields.llmApiKey.value = settings.llmApiKey || '';
     formFields.llmModel.value = settings.llmModel || 'gpt-3.5-turbo';
@@ -142,6 +153,7 @@ async function loadSettings() {
     toggleSnFields();
     
     toggleLLMSection();
+    toggleChatFields();
     
   } catch (error) {
     console.error('Error loading settings:', error);
@@ -178,6 +190,14 @@ function toggleLLMSection() {
   }
 }
 
+// Toggle Chat fields
+function toggleChatFields() {
+  const chatFields = document.getElementById('chatFields');
+  if (chatFields) {
+    chatFields.style.display = formFields.enableChat.checked ? 'block' : 'none';
+  }
+}
+
 // Handle save settings
 async function handleSaveSettings(event) {
   event.preventDefault();
@@ -198,6 +218,10 @@ async function handleSaveSettings(event) {
       enableDummyArticles: formFields.enableDummyArticles.checked,
       enableLLMSearch: formFields.enableLLMSearch.checked,
       enablePageScanning: formFields.enablePageScanning.checked,
+      enableChat: formFields.enableChat.checked,
+      chatBackendUrl: formFields.chatBackendUrl.value.trim(),
+      allowCurrentArticleChat: formFields.allowCurrentArticleChat.checked,
+      allowKnowledgeBaseChat: formFields.allowKnowledgeBaseChat.checked,
       llmEndpoint: formFields.llmEndpoint.value.trim(),
       llmApiKey: formFields.llmApiKey.value.trim(),
       llmModel: formFields.llmModel.value.trim() || 'gpt-3.5-turbo',
@@ -270,6 +294,10 @@ async function handleResetToDefaults() {
       llmApiKey: '',
       llmModel: 'gpt-3.5-turbo',
       enablePageScanning: false,
+      enableChat: false,
+      chatBackendUrl: '',
+      allowCurrentArticleChat: true,
+      allowKnowledgeBaseChat: true,
       serviceNow: typeof defaultServiceNowSettings === 'function'
         ? defaultServiceNowSettings()
         : {}

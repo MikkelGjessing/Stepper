@@ -59,6 +59,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Subscribe to storage changes
   setupStorageListener();
+
+  // Initialise the chat drawer (requires settings to be loaded)
+  initChatDrawer();
 });
 
 // Setup event listeners
@@ -255,6 +258,7 @@ function setupStorageListener() {
       console.log('Settings changed, refreshing articles');
       currentSettings = await Storage.getSettings();
       await loadArticles();
+      applyChatSettings();
     }
     
     // React to articles changes
@@ -1237,4 +1241,335 @@ function openImageViewer(src, alt) {
       chrome.windows.create({ url: viewerUrl, type: 'popup', width: 1100, height: 800 });
     });
   });
+}
+
+// ═══════════════════════════════════════════════════
+// CHAT DRAWER
+// ═══════════════════════════════════════════════════
+
+const CHAT_DRAWER_STATE = {
+  CLOSED: 'closed',
+  OPEN_MEDIUM: 'open_medium',
+  OPEN_EXPANDED: 'open_expanded'
+};
+
+// Animation duration must match the CSS transition in .chat-drawer (0.3s)
+const CHAT_DRAWER_ANIMATION_MS = 300;
+// Maximum chat input auto-grow height in px (matches CSS max-height on .chat-input)
+const CHAT_INPUT_MAX_HEIGHT_PX = 80;
+// Number of recent history turns sent to the backend for context
+const MAX_CHAT_HISTORY_TURNS = 10;
+
+let chatDrawerState = CHAT_DRAWER_STATE.CLOSED;
+let chatMode = 'kb'; // 'kb' | 'current_article'
+let chatHistory = []; // { role: 'user'|'assistant'|'system', content: string, sources?: [] }
+let chatIsLoading = false;
+
+// DOM references (resolved after DOMContentLoaded)
+let chatDrawerEl = null;
+let chatTriggerBtn = null;
+let chatDrawerCloseBtn = null;
+let chatDrawerResizeBtn = null;
+let chatModeSwitch = null;
+let chatContextLabel = null;
+let chatMessagesEl = null;
+let chatInputEl = null;
+let chatSendBtn = null;
+
+/**
+ * Initialise the chat drawer after DOM is ready and settings are loaded.
+ * Called from the existing DOMContentLoaded handler.
+ */
+function initChatDrawer() {
+  chatDrawerEl        = document.getElementById('chatDrawer');
+  chatTriggerBtn      = document.getElementById('chatTriggerBtn');
+  chatDrawerCloseBtn  = document.getElementById('chatDrawerClose');
+  chatDrawerResizeBtn = document.getElementById('chatDrawerResize');
+  chatModeSwitch      = document.getElementById('chatModeSwitch');
+  chatContextLabel    = document.getElementById('chatContextLabel');
+  chatMessagesEl      = document.getElementById('chatMessages');
+  chatInputEl         = document.getElementById('chatInput');
+  chatSendBtn         = document.getElementById('chatSendBtn');
+
+  if (!chatDrawerEl) return;
+
+  // Show/hide trigger based on settings
+  applyChatSettings();
+
+  // Event listeners
+  chatTriggerBtn.addEventListener('click', toggleChatDrawer);
+  chatDrawerCloseBtn.addEventListener('click', closeChatDrawer);
+  chatDrawerResizeBtn.addEventListener('click', cycleChatDrawerSize);
+  chatModeSwitch.addEventListener('click', toggleChatMode);
+  chatSendBtn.addEventListener('click', handleChatSend);
+  chatInputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleChatSend();
+    }
+  });
+  // Auto-grow textarea
+  chatInputEl.addEventListener('input', () => {
+    chatInputEl.style.height = 'auto';
+    chatInputEl.style.height = Math.min(chatInputEl.scrollHeight, CHAT_INPUT_MAX_HEIGHT_PX) + 'px';
+  });
+}
+
+/**
+ * Apply current settings to show/hide the trigger and configure allowed modes.
+ */
+function applyChatSettings() {
+  if (!chatTriggerBtn) return;
+  const settings = currentSettings || {};
+  if (settings.enableChat) {
+    chatTriggerBtn.style.display = 'flex';
+  } else {
+    chatTriggerBtn.style.display = 'none';
+    // Also close drawer if settings were changed while it was open
+    if (chatDrawerState !== CHAT_DRAWER_STATE.CLOSED) {
+      closeChatDrawer();
+    }
+  }
+}
+
+/**
+ * Determine the appropriate default chat mode based on current UI state.
+ * If an article is open and allowCurrentArticleChat is enabled, use 'current_article'.
+ * Otherwise default to 'kb'.
+ */
+function resolveChatMode() {
+  const settings = currentSettings || {};
+  const articleOpen = (currentUIState === UI_STATE.ARTICLE ||
+                       currentUIState === UI_STATE.FULL_ARTICLE) &&
+                      currentSelectedArticle !== null;
+
+  if (articleOpen && settings.allowCurrentArticleChat !== false) {
+    return 'current_article';
+  }
+  return 'kb';
+}
+
+/**
+ * Update the context label and mode-switch button to reflect current chatMode.
+ */
+function updateChatContextUI() {
+  if (!chatContextLabel || !chatModeSwitch) return;
+  const settings = currentSettings || {};
+
+  // Determine whether the alternative mode is available
+  const articleOpen = (currentUIState === UI_STATE.ARTICLE ||
+                       currentUIState === UI_STATE.FULL_ARTICLE) &&
+                      currentSelectedArticle !== null;
+
+  const canSwitchToArticle = articleOpen && settings.allowCurrentArticleChat !== false;
+  const canSwitchToKb      = settings.allowKnowledgeBaseChat !== false;
+
+  if (chatMode === 'current_article') {
+    const articleTitle = currentSelectedArticle
+      ? currentSelectedArticle.title || 'current guide'
+      : 'current guide';
+    chatContextLabel.textContent = `Asking about: ${articleTitle}`;
+    if (canSwitchToKb) {
+      chatModeSwitch.textContent = '→ Ask knowledge base';
+      chatModeSwitch.style.display = 'inline-block';
+    } else {
+      chatModeSwitch.style.display = 'none';
+    }
+  } else {
+    chatContextLabel.textContent = 'Asking Stepper knowledge base';
+    if (canSwitchToArticle) {
+      chatModeSwitch.textContent = '→ Ask about current guide';
+      chatModeSwitch.style.display = 'inline-block';
+    } else {
+      chatModeSwitch.style.display = 'none';
+    }
+  }
+}
+
+// ── Drawer state helpers ────────────────────────────
+
+function openChatDrawer() {
+  if (!chatDrawerEl) return;
+  chatMode = resolveChatMode();
+  chatDrawerState = CHAT_DRAWER_STATE.OPEN_MEDIUM;
+  chatDrawerEl.classList.remove('drawer-expanded');
+  chatDrawerEl.classList.add('drawer-medium');
+  chatDrawerEl.setAttribute('aria-hidden', 'false');
+  updateChatContextUI();
+  if (chatMessagesEl && chatMessagesEl.children.length === 0) {
+    renderWelcomeMessage();
+  }
+  // Focus input
+  setTimeout(() => chatInputEl && chatInputEl.focus(), CHAT_DRAWER_ANIMATION_MS);
+}
+
+function closeChatDrawer() {
+  if (!chatDrawerEl) return;
+  chatDrawerState = CHAT_DRAWER_STATE.CLOSED;
+  chatDrawerEl.classList.remove('drawer-medium', 'drawer-expanded');
+  chatDrawerEl.setAttribute('aria-hidden', 'true');
+}
+
+function toggleChatDrawer() {
+  if (chatDrawerState === CHAT_DRAWER_STATE.CLOSED) {
+    openChatDrawer();
+  } else {
+    closeChatDrawer();
+  }
+}
+
+function cycleChatDrawerSize() {
+  if (!chatDrawerEl) return;
+  if (chatDrawerState === CHAT_DRAWER_STATE.OPEN_MEDIUM) {
+    chatDrawerState = CHAT_DRAWER_STATE.OPEN_EXPANDED;
+    chatDrawerEl.classList.remove('drawer-medium');
+    chatDrawerEl.classList.add('drawer-expanded');
+  } else {
+    chatDrawerState = CHAT_DRAWER_STATE.OPEN_MEDIUM;
+    chatDrawerEl.classList.remove('drawer-expanded');
+    chatDrawerEl.classList.add('drawer-medium');
+  }
+}
+
+function toggleChatMode() {
+  chatMode = (chatMode === 'kb') ? 'current_article' : 'kb';
+  updateChatContextUI();
+}
+
+function setChatContext(mode) {
+  chatMode = (mode === 'current_article') ? 'current_article' : 'kb';
+  updateChatContextUI();
+}
+
+// ── Rendering ────────────────────────────────────────
+
+function renderWelcomeMessage() {
+  if (!chatMessagesEl) return;
+  const settings = currentSettings || {};
+  if (!settings.chatBackendUrl) {
+    appendChatMessage('system', '💬 Chat is not enabled yet. Configure a chat backend URL in Settings to get started.');
+  } else {
+    appendChatMessage('system', '👋 Hi! Ask me anything about the guides or the knowledge base.');
+  }
+}
+
+/**
+ * Append a message bubble to the chat messages area.
+ * @param {'user'|'assistant'|'system'} role
+ * @param {string} text - Plain text or simple HTML (assistant only)
+ * @param {Array<{id:string, title:string}>} [sources]
+ */
+function appendChatMessage(role, text, sources) {
+  if (!chatMessagesEl) return;
+  const msg = document.createElement('div');
+  msg.className = `chat-msg ${role}`;
+
+  if (role === 'assistant') {
+    msg.innerHTML = sanitizeHtml(text);
+    if (sources && sources.length > 0) {
+      const sourcesDiv = document.createElement('div');
+      sourcesDiv.style.marginTop = '8px';
+      sources.forEach(src => {
+        const btn = document.createElement('button');
+        btn.className = 'chat-source-btn';
+        btn.textContent = '📄 ' + escapeHtml(src.title || src.id);
+        btn.addEventListener('click', () => {
+          closeChatDrawer();
+          displayArticle(src.id);
+        });
+        sourcesDiv.appendChild(btn);
+      });
+      msg.appendChild(sourcesDiv);
+    }
+  } else {
+    msg.textContent = text;
+  }
+
+  chatMessagesEl.appendChild(msg);
+  chatHistory.push({ role, content: text });
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+}
+
+function showChatLoading() {
+  if (!chatMessagesEl) return;
+  const el = document.createElement('div');
+  el.className = 'chat-loading';
+  el.id = 'chatLoadingIndicator';
+  el.textContent = 'Thinking';
+  chatMessagesEl.appendChild(el);
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+}
+
+function hideChatLoading() {
+  const el = document.getElementById('chatLoadingIndicator');
+  if (el) el.remove();
+}
+
+// ── Sending ──────────────────────────────────────────
+
+async function handleChatSend() {
+  if (!chatInputEl || chatIsLoading) return;
+  const text = chatInputEl.value.trim();
+  if (!text) return;
+
+  chatInputEl.value = '';
+  chatInputEl.style.height = 'auto';
+
+  appendChatMessage('user', text);
+
+  chatIsLoading = true;
+  if (chatSendBtn) chatSendBtn.disabled = true;
+
+  showChatLoading();
+  try {
+    const result = await sendChatMessage({
+      message: text,
+      mode: chatMode,
+      currentArticleId: (chatMode === 'current_article' && currentSelectedArticle)
+        ? currentSelectedArticle.id
+        : null
+    });
+    hideChatLoading();
+    appendChatMessage('assistant', result.answer || 'No response received.', result.sources);
+  } catch (err) {
+    hideChatLoading();
+    appendChatMessage('system', '⚠️ ' + (err.message || 'Something went wrong. Please try again.'));
+  } finally {
+    chatIsLoading = false;
+    if (chatSendBtn) chatSendBtn.disabled = false;
+    chatInputEl.focus();
+  }
+}
+
+/**
+ * Send a chat message to the configured backend.
+ * @param {{ message: string, mode: string, currentArticleId: string|null }} params
+ * @returns {Promise<{ answer: string, sources?: Array<{id:string,title:string}> }>}
+ */
+async function sendChatMessage({ message, mode, currentArticleId }) {
+  const settings = currentSettings || {};
+  const backendUrl = settings.chatBackendUrl || '';
+
+  if (!backendUrl) {
+    throw new Error('Chat is not enabled yet. Configure a chat backend URL in Settings.');
+  }
+
+  const payload = { message, mode };
+  if (currentArticleId) {
+    payload.currentArticleId = currentArticleId;
+  }
+  // Include recent conversation history (last 10 turns)
+  payload.history = chatHistory.slice(-MAX_CHAT_HISTORY_TURNS).map(h => ({ role: h.role, content: h.content }));
+
+  const response = await fetch(backendUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Chat backend returned ${response.status}: ${response.statusText}`);
+  }
+
+  return await response.json();
 }
