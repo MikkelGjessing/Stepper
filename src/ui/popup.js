@@ -28,7 +28,7 @@ const searchBtn = document.getElementById('searchBtn');
 const settingsBtn = document.getElementById('settingsBtn');
 const resultsList = document.getElementById('resultsList');
 const resultCount = document.getElementById('resultCount');
-const refreshBtn = document.getElementById('refreshBtn');
+const mainFooter = document.getElementById('mainFooter');
 const welcomeMessage = document.getElementById('welcomeMessage');
 const resultsContent = document.getElementById('resultsContent');
 
@@ -75,11 +75,6 @@ function setupEventListeners() {
   
   settingsBtn.addEventListener('click', () => {
     chrome.runtime.openOptionsPage();
-  });
-  
-  refreshBtn.addEventListener('click', async () => {
-    await loadArticles();
-    showNotification('Articles refreshed');
   });
 
   // Keyboard navigation for ARTICLE mode
@@ -1323,8 +1318,10 @@ function applyChatSettings() {
   const settings = currentSettings || {};
   if (settings.enableChat) {
     chatTriggerBtn.style.display = 'flex';
+    if (mainFooter) mainFooter.style.display = 'flex';
   } else {
     chatTriggerBtn.style.display = 'none';
+    if (mainFooter) mainFooter.style.display = 'none';
     // Also close drawer if settings were changed while it was open
     if (chatDrawerState !== CHAT_DRAWER_STATE.CLOSED) {
       closeChatDrawer();
