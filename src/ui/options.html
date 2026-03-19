@@ -185,6 +185,48 @@
           </div>
         </section>
 
+        <!-- Ask Stepper Chat Section -->
+        <section class="settings-section">
+          <h2 class="section-title">💬 Ask Stepper Chat</h2>
+
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="enableChat" class="checkbox">
+              <span>Enable Ask Stepper chat drawer</span>
+            </label>
+            <span class="help-text">Shows a collapsible chat drawer in the popup for asking questions about guides or the knowledge base</span>
+          </div>
+
+          <div id="chatFields" style="display: none;">
+            <div class="form-group">
+              <label class="label" for="chatBackendUrl">Chat backend URL</label>
+              <input
+                type="url"
+                id="chatBackendUrl"
+                class="input"
+                placeholder="https://your-backend.example.com/api/chat"
+              />
+              <span class="help-text">Backend endpoint that handles chat requests. Leave blank to show a "not enabled" message.</span>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="allowCurrentArticleChat" class="checkbox">
+                <span>Allow asking about the current guide</span>
+              </label>
+              <span class="help-text">Let users ask questions about the article/guide they are currently reading</span>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="allowKnowledgeBaseChat" class="checkbox">
+                <span>Allow asking the knowledge base</span>
+              </label>
+              <span class="help-text">Let users ask general questions across all articles in the knowledge base</span>
+            </div>
+          </div>
+        </section>
+
         <!-- LLM Configuration Section -->
         <section class="settings-section" id="llmSection" style="display: none;">
           <h2 class="section-title">🤖 LLM Configuration</h2>
