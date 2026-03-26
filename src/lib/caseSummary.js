@@ -16,10 +16,9 @@ function generateCaseSummary(completedInstructions) {
 
   const sorted = [...completedInstructions].sort((a, b) => a.order - b.order);
 
-  const lines = sorted.map((item, index) => {
-    const num = index + 1;
+  const lines = sorted.map(item => {
     const title = (item.articleTitle || 'Untitled').trim();
-    return `${num}. ${title}`;
+    return `${item.order}. ${title}`;
   });
 
   return (

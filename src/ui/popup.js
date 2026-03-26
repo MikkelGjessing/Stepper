@@ -14,7 +14,8 @@ const UI_STATE = {
 // Case State Machine
 const CASE_STATE = {
   NOT_STARTED: 'not_started',
-  ACTIVE: 'active'
+  ACTIVE: 'active',
+  CONCLUDED: 'concluded'  // Transient display state; not persisted separately
 };
 
 let currentUIState = UI_STATE.SEARCH;
@@ -251,12 +252,16 @@ function simpleMarkdownToHtml(md) {
 
 /**
  * Escape HTML in inline text while preserving simple **bold** and *italic* markdown.
+ * escapeHtml() is applied first so all < > & characters are already entities;
+ * the bold/italic patterns only wrap the already-safe escaped content.
  */
 function escapeHtmlInline(text) {
+  // First escape all HTML so captured groups contain only entity-safe text
   const escaped = escapeHtml(text);
+  // Now replace markdown markers – captured groups are already HTML-safe
   return escaped
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>');
+    .replace(/\*\*([^*]+)\*\*/g, (_, inner) => '<strong>' + inner + '</strong>')
+    .replace(/\*([^*]+)\*/g, (_, inner) => '<em>' + inner + '</em>');
 }
 
 /**
@@ -422,7 +427,9 @@ async function handleCloseConcludeCase() {
 async function addCompletedInstructionToCase(articleId, articleTitle) {
   if (!activeCase || caseState !== CASE_STATE.ACTIVE) return;
 
-  const order = (activeCase.completedInstructions.length) + 1;
+  const order = activeCase.completedInstructions.length > 0
+    ? Math.max(...activeCase.completedInstructions.map(i => i.order)) + 1
+    : 1;
   activeCase.completedInstructions.push({
     articleId,
     articleTitle: articleTitle || 'Untitled',
