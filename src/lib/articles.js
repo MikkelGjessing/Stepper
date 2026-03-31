@@ -3187,6 +3187,49 @@ const Articles = {
   },
 
   /**
+   * Clear all knowledge-base articles (source: 'knowledge') and reset the
+   * loaded-files registry so they will be re-ingested on the next load.
+   * @returns {Promise<{success: boolean, count: number, message: string}>}
+   */
+  async clearKnowledgeArticles() {
+    try {
+      const articles = await Storage.getArticles();
+      const knowledgeArticles = articles.filter(a => a.source === 'knowledge');
+      const otherArticles = articles.filter(a => a.source !== 'knowledge');
+
+      await Storage.setArticles(otherArticles);
+      await chrome.storage.local.remove('knowledge_loaded_files');
+
+      return {
+        success: true,
+        count: knowledgeArticles.length,
+        message: `Deleted ${knowledgeArticles.length} knowledge article(s)`
+      };
+    } catch (error) {
+      console.error('Error clearing knowledge articles:', error);
+      return {
+        success: false,
+        count: 0,
+        message: `Error: ${error.message}`
+      };
+    }
+  },
+
+  /**
+   * Get count of knowledge articles
+   * @returns {Promise<number>} Count of knowledge articles
+   */
+  async getKnowledgeArticlesCount() {
+    try {
+      const articles = await Storage.getArticles();
+      return articles.filter(a => a.source === 'knowledge').length;
+    } catch (error) {
+      console.error('Error getting knowledge articles count:', error);
+      return 0;
+    }
+  },
+
+  /**
    * Validate article object against schema
    * @param {Object} article - Article to validate
    * @returns {boolean} True if valid

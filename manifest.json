@@ -33,5 +33,11 @@
     "https://*/*",
     "http://*/*",
     "https://nets.service-now.com/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["knowledge/*"],
+      "matches": ["<all_urls>"]
+    }
   ]
 }
