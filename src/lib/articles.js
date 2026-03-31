@@ -1840,7 +1840,7 @@ const Articles = {
       // relative path resolves to the correct chrome-extension:// worker URL.
       if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
         pdfjsLib.GlobalWorkerOptions.workerSrc =
-          new URL('../../vendor/pdfjs/pdf.worker.min.js', location.href).href;
+          new URL('../vendor/pdfjs/pdf.worker.min.js', location.href).href;
       }
 
       // Read file as ArrayBuffer
