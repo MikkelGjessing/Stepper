@@ -1243,9 +1243,11 @@ const Articles = {
       
       let parseResult;
       
-      // Handle DOCX files differently (need ArrayBuffer)
+      // Handle binary formats that need ArrayBuffer (DOCX, PDF)
       if (fileType === 'docx' || fileType === 'doc') {
         parseResult = await this.parseDocxArticle(file, fileNameWithoutExt);
+      } else if (fileType === 'pdf') {
+        parseResult = await this.parsePdfArticle(file, fileNameWithoutExt);
       } else {
         let content;
         try {
@@ -1281,7 +1283,7 @@ const Articles = {
               ok: false,
               errorCode: 'UNSUPPORTED_FILE_TYPE',
               message: `Unsupported file type: .${fileType}`,
-              details: `Supported formats: .json, .md, .html, .htm, .txt, .docx, .doc`,
+              details: `Supported formats: .json, .md, .html, .htm, .txt, .docx, .doc, .pdf`,
               fileName: fileName
             };
         }
@@ -1807,6 +1809,381 @@ const Articles = {
         details: error.message
       };
     }
+  },
+
+  /**
+   * Parse a PDF article using pdf.js.
+   *
+   * Pipeline:
+   *   1. Read PDF as ArrayBuffer
+   *   2. Extract text content page by page with pdf.js
+   *   3. Convert to HTML and run through the shared ingestion pipeline
+   *
+   * @param {File}   file          - PDF file object
+   * @param {string} fallbackTitle - Fallback title (filename without extension)
+   * @returns {Promise<Object>} Result with ok status and article or error details
+   */
+  async parsePdfArticle(file, fallbackTitle) {
+    try {
+      // Check if pdfjs is available
+      if (typeof pdfjsLib === 'undefined') {
+        return {
+          ok: false,
+          errorCode: 'PDF_LIBRARY_NOT_AVAILABLE',
+          message: 'PDF parsing library not available',
+          details: 'pdf.js library is not loaded. Please check that the vendor file is properly included.'
+        };
+      }
+
+      // Point the worker to the locally vendored file so no CDN is needed.
+      // location.href is the chrome-extension:// URL of the options page, so the
+      // relative path resolves to the correct chrome-extension:// worker URL.
+      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+          new URL('../vendor/pdfjs/pdf.worker.min.js', location.href).href;
+      }
+
+      // Read file as ArrayBuffer
+      let arrayBuffer;
+      try {
+        arrayBuffer = await file.arrayBuffer();
+      } catch (readError) {
+        return {
+          ok: false,
+          errorCode: 'PDF_READ_ERROR',
+          message: 'Failed to read PDF file',
+          details: readError.message
+        };
+      }
+
+      // Load the PDF document
+      let pdfDoc;
+      try {
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        pdfDoc = await loadingTask.promise;
+      } catch (loadError) {
+        if (loadError && loadError.name === 'PasswordException') {
+          return {
+            ok: false,
+            errorCode: 'PDF_ENCRYPTED',
+            message: 'Failed: encrypted/protected PDF',
+            details: 'This PDF is password-protected and cannot be imported.'
+          };
+        }
+        return {
+          ok: false,
+          errorCode: 'PDF_LOAD_ERROR',
+          message: 'Failed: unreadable PDF format',
+          details: loadError ? loadError.message : 'Unknown error loading PDF'
+        };
+      }
+
+      const pageCount = pdfDoc.numPages;
+
+      // Extract text from each page
+      const pageTexts = [];
+      let totalTextLength = 0;
+
+      for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
+        const page = await pdfDoc.getPage(pageNum);
+        const textContent = await page.getTextContent();
+        const pageText = this._extractPdfPageText(textContent);
+        pageTexts.push(pageText);
+        totalTextLength += pageText.trim().length;
+      }
+
+      // Detect scanned / image-only PDF: fail gracefully with a clear message
+      const MIN_TEXT_CHARS = 50 * Math.min(pageCount, 3);
+      if (totalTextLength < MIN_TEXT_CHARS) {
+        return {
+          ok: false,
+          errorCode: 'PDF_IMAGE_ONLY',
+          message: 'Failed: scanned/image-only PDF',
+          details: 'This PDF appears to be image-based or scanned and could not be imported as text. Please upload a text-based PDF or DOCX version.'
+        };
+      }
+
+      // Attempt to get PDF metadata title
+      let pdfMetaTitle = null;
+      try {
+        const metadata = await pdfDoc.getMetadata();
+        if (metadata && metadata.info && typeof metadata.info.Title === 'string') {
+          const candidate = metadata.info.Title.trim();
+          if (candidate.length > 2) pdfMetaTitle = candidate;
+        }
+      } catch (_) {
+        // metadata not critical — ignore errors
+      }
+
+      // Convert extracted page texts to HTML for the ingestion pipeline
+      const htmlContent = this._pdfTextsToHtml(pageTexts);
+
+      // Parse the HTML content
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(htmlContent, 'text/html');
+
+      // Resolve article title (PDF metadata title → h1 → top heading → first line → filename)
+      const rawSourceData = pdfMetaTitle ? { title: pdfMetaTitle } : null;
+      const { title, originalTitle, originalTitleCandidate, titleSource, titleCandidates } =
+        this.resolveArticleTitle(rawSourceData, doc, fallbackTitle);
+
+      // Remove the element used as the title so it does not appear in step content
+      if (titleSource === 'h1') {
+        const h1 = doc.querySelector('h1');
+        if (h1) h1.remove();
+      } else if (titleSource === 'topHeading') {
+        const body = doc.body || doc.documentElement;
+        if (body) {
+          for (const el of body.querySelectorAll('h2, h3')) {
+            if (el.textContent.trim() === title) { el.remove(); break; }
+          }
+        }
+      } else if (titleSource === 'first_line') {
+        const body = doc.body || doc.documentElement;
+        if (body) {
+          for (const el of body.querySelectorAll('p, h2, h3, h4, h5, h6')) {
+            const text = el.textContent.trim();
+            if (text === title ||
+                (title.length === this.MAX_TITLE_LENGTH_FROM_FIRST_LINE && text.startsWith(title))) {
+              el.remove();
+              break;
+            }
+          }
+        }
+      }
+
+      // Run the shared ingestion pipeline (normalise → strategy-select → parse)
+      const { steps, parserMeta, normalizedArticle } = Ingestion.ingest(doc, 'uploaded', title);
+
+      // Derive summary: prefer intro section text, fall back to first paragraph
+      let summary = '';
+      if (normalizedArticle.introHtml) {
+        summary = this.stripHtmlTags(normalizedArticle.introHtml).substring(0, 300).trim();
+      }
+      if (!summary) {
+        const firstP = doc.querySelector('p');
+        if (firstP) {
+          const firstH2 = doc.querySelector('h2');
+          if (!firstH2 || this.isBefore(firstP, firstH2)) {
+            summary = firstP.textContent.trim().substring(0, 300);
+          }
+        }
+      }
+
+      console.log(`[Stepper] Article imported (pdf): title="${title}" | titleSource=${titleSource} | steps=${steps.length} | pages=${pageCount}`);
+
+      const articleData = {
+        id: this.generateUUID(),
+        title,
+        originalTitle,
+        originalTitleCandidate,
+        titleSource,
+        titleCandidates,
+        summary,
+        introHtml:       normalizedArticle.introHtml       || '',
+        relatedInfoHtml: normalizedArticle.relatedInfoHtml || '',
+        tags:            normalizedArticle.tags.length > 0  ? normalizedArticle.tags : [],
+        estimatedMinutes: null,
+        steps,
+        parserMeta,
+        source: 'uploaded',
+        metadata: {
+          originalFilename: file.name,
+          pageCount,
+          importType: 'pdf'
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      articleData.searchText = this.buildSearchText(articleData);
+
+      let message = `Successfully imported: ${title} (${pageCount} page${pageCount === 1 ? '' : 's'}, ${steps.length} step${steps.length === 1 ? '' : 's'})`;
+      return { ok: true, article: articleData, message, pageCount, stepCount: steps.length };
+
+    } catch (error) {
+      console.error('Error parsing PDF article:', error);
+      return {
+        ok: false,
+        errorCode: 'PDF_PARSE_ERROR',
+        message: 'Unexpected error parsing PDF',
+        details: error.message
+      };
+    }
+  },
+
+  /**
+   * Extract readable text from a single pdf.js page textContent object.
+   *
+   * Items are grouped into lines by their Y coordinate; lines with a large gap
+   * between them are treated as separate paragraphs (blank line inserted).
+   *
+   * @param {Object} textContent - pdf.js TextContent object (has .items array)
+   * @returns {string} Plain text with blank lines separating paragraphs
+   */
+  _extractPdfPageText(textContent) {
+    if (!textContent || !Array.isArray(textContent.items) || textContent.items.length === 0) {
+      return '';
+    }
+
+    // Each TextItem has: str, transform ([a,b,c,d,x,y]), width, height, fontName
+    // transform[5] = y, transform[4] = x (PDF coordinate space, y increases upward)
+    const SAME_LINE_THRESHOLD = 3;   // px: items within this Y range share a line
+    const PARA_GAP_MULTIPLIER  = 1.8; // gaps > 1.8× typical line height → paragraph
+
+    // Build lines: each line is {y, items[]}
+    const lines = [];
+    let currentLine = null;
+
+    for (const item of textContent.items) {
+      if (typeof item.str !== 'string') continue;
+      const transform = item.transform;
+      if (!Array.isArray(transform) || transform.length < 6) continue;
+      const y = transform[5];
+
+      if (!currentLine || Math.abs(currentLine.y - y) > SAME_LINE_THRESHOLD) {
+        currentLine = { y, items: [] };
+        lines.push(currentLine);
+      }
+      currentLine.items.push(item);
+    }
+
+    if (lines.length === 0) return '';
+
+    // Sort lines top-to-bottom (larger Y = higher on page in PDF coords)
+    lines.sort((a, b) => b.y - a.y);
+
+    // Estimate a typical line height from consecutive line gaps
+    const gaps = [];
+    for (let i = 1; i < lines.length; i++) {
+      const g = Math.abs(lines[i - 1].y - lines[i].y);
+      if (g > 0) gaps.push(g);
+    }
+    gaps.sort((a, b) => a - b);
+    const medianGap = gaps.length > 0 ? gaps[Math.floor(gaps.length / 2)] : 12;
+    const paraThreshold = medianGap * PARA_GAP_MULTIPLIER;
+
+    // Build text
+    const parts = [];
+    let prevY = null;
+
+    for (const line of lines) {
+      // Sort items within line left-to-right
+      line.items.sort((a, b) => a.transform[4] - b.transform[4]);
+
+      // Concatenate item strings; add a space between items when there is a gap
+      let lineText = '';
+      let prevItemRight = null;
+      for (const item of line.items) {
+        const x = item.transform[4];
+        const w = typeof item.width === 'number' ? item.width : 0;
+        if (prevItemRight !== null && x - prevItemRight > 1) {
+          lineText += ' ';
+        }
+        lineText += item.str;
+        prevItemRight = x + w;
+      }
+      lineText = lineText.trim();
+      if (!lineText) continue;
+
+      if (prevY !== null) {
+        const gap = Math.abs(prevY - line.y);
+        if (gap > paraThreshold) {
+          parts.push('');  // blank line = paragraph separator
+        }
+      }
+      parts.push(lineText);
+      prevY = line.y;
+    }
+
+    return parts.join('\n');
+  },
+
+  /**
+   * Convert an array of per-page plain-text strings (from _extractPdfPageText)
+   * into an HTML document fragment suitable for the shared ingestion pipeline.
+   *
+   * Heuristics applied:
+   *   - Short lines in ALL-CAPS or title-cased with no terminating punctuation → <h2>
+   *   - Lines/paragraphs matching "Step N" or numbered-list patterns → kept as <p>
+   *     (the ingestion pipeline will segment them into steps)
+   *   - Bullet-list blocks → <ul>/<li>
+   *   - Everything else → <p>
+   *
+   * @param {string[]} pageTexts - Array of per-page plain text strings
+   * @returns {string} HTML string
+   */
+  _pdfTextsToHtml(pageTexts) {
+    const MAX_HEADING_LEN = 80;
+    // Matches lines like "- item", "• item", "* item"
+    const BULLET_RE  = /^[\-\u2022\u25CF\u25E6\u2013*]\s+(.+)$/;
+    // Matches lines like "1. item", "2) item", "a. item"
+    const ORDERED_RE = /^([a-zA-Z]|\d+)[.)]\s+(.+)$/;
+
+    const htmlParts = [];
+
+    for (const pageText of pageTexts) {
+      if (!pageText.trim()) continue;
+
+      // Split into blocks by blank lines (paragraph boundaries)
+      const blocks = pageText.split(/\n{2,}/);
+
+      for (const block of blocks) {
+        const trimmed = block.trim();
+        if (!trimmed) continue;
+
+        const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean);
+        if (lines.length === 0) continue;
+
+        // Single-line block — check if it looks like a section heading
+        if (lines.length === 1) {
+          const line = lines[0];
+          if (
+            line.length <= MAX_HEADING_LEN &&
+            !line.endsWith('.') && !line.endsWith(',') &&
+            (
+              line === line.toUpperCase() ||          // ALL-CAPS heading
+              /^(step\s+\d+|chapter\s+\d+|\d+\.\s+\S)/i.test(line) === false  // not a step/numbered item
+            ) &&
+            /^[A-Z\d]/.test(line) &&                 // starts with capital or digit
+            line.split(' ').length <= 12             // ≤ 12 words
+          ) {
+            // Extra check: not a standalone numbered-list item
+            if (!/^[\-\u2022\u25CF\u25E6\u2013*]\s/.test(line) && !/^([a-zA-Z]|\d+)[.)]\s/.test(line)) {
+              htmlParts.push(`<h2>${this.escapeHtml(line)}</h2>`);
+              continue;
+            }
+          }
+          htmlParts.push(`<p>${this.escapeHtml(line)}</p>`);
+          continue;
+        }
+
+        // Multi-line block — check if it is a bullet/ordered list
+        const bulletLines  = lines.filter(l => BULLET_RE.test(l));
+        const orderedLines = lines.filter(l => ORDERED_RE.test(l));
+
+        if (bulletLines.length === lines.length) {
+          const items = lines.map(l => {
+            const m = l.match(BULLET_RE);
+            return `<li>${this.escapeHtml(m ? m[1] : l)}</li>`;
+          }).join('');
+          htmlParts.push(`<ul>${items}</ul>`);
+        } else if (orderedLines.length === lines.length) {
+          const items = lines.map(l => {
+            const m = l.match(ORDERED_RE);
+            return `<li>${this.escapeHtml(m ? m[2] : l)}</li>`;
+          }).join('');
+          htmlParts.push(`<ol>${items}</ol>`);
+        } else {
+          // Mixed or prose block — emit each line as its own paragraph so that
+          // the ingestion pipeline can detect Step N: markers etc.
+          for (const line of lines) {
+            htmlParts.push(`<p>${this.escapeHtml(line)}</p>`);
+          }
+        }
+      }
+    }
+
+    return htmlParts.join('\n');
   },
 
   /**
