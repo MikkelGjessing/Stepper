@@ -24,6 +24,10 @@ const clearUploadedArticlesBtn = document.getElementById('clearUploadedArticlesB
 const articleFileInput = document.getElementById('articleFile');
 const uploadStatus = document.getElementById('uploadStatus');
 const uploadedArticlesCount = document.getElementById('uploadedArticlesCount');
+const reloadKnowledgeBtn = document.getElementById('reloadKnowledgeBtn');
+const clearKnowledgeBtn = document.getElementById('clearKnowledgeBtn');
+const knowledgeStatus = document.getElementById('knowledgeStatus');
+const knowledgeArticlesCount = document.getElementById('knowledgeArticlesCount');
 const syncRepoBtn = document.getElementById('syncRepoBtn');
 const syncStatus = document.getElementById('syncStatus');
 const repoArticlesCount = document.getElementById('repoArticlesCount');
@@ -65,7 +69,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   await updateUploadedArticlesCount();
   await updateRepoArticlesCount();
   await updateSnInfo();
+  await updateKnowledgeArticlesCount();
   setupEventListeners();
+  // Auto-load knowledge files (force=true so settings page always re-ingests
+  // the bundled files, picking up any updates committed to the knowledge folder).
+  // Run in the background so the page stays responsive; errors are surfaced via
+  // the knowledgeStatus element inside the function.
+  handleReloadKnowledge({ silent: true }).catch(e =>
+    console.error('Knowledge auto-load failed', e)
+  );
 });
 
 // Setup event listeners
@@ -105,7 +117,11 @@ function setupEventListeners() {
   // Upload article actions
   importArticleBtn.addEventListener('click', handleImportArticle);
   clearUploadedArticlesBtn.addEventListener('click', handleClearUploadedArticles);
-  
+
+  // Knowledge base actions
+  reloadKnowledgeBtn.addEventListener('click', () => handleReloadKnowledge({ force: true }));
+  clearKnowledgeBtn.addEventListener('click', handleClearKnowledge);
+
   // Sync repository
   syncRepoBtn.addEventListener('click', handleSyncRepo);
 }
@@ -842,6 +858,95 @@ async function updateUploadedArticlesCount() {
   } catch (error) {
     console.error('Error updating uploaded articles count:', error);
     uploadedArticlesCount.textContent = '';
+  }
+}
+
+// Update knowledge articles count
+async function updateKnowledgeArticlesCount() {
+  try {
+    const count = await Articles.getKnowledgeArticlesCount();
+    if (count > 0) {
+      knowledgeArticlesCount.textContent = `📊 ${count} knowledge article${count === 1 ? '' : 's'} loaded`;
+      knowledgeArticlesCount.style.fontWeight = '500';
+    } else {
+      knowledgeArticlesCount.textContent = 'No knowledge articles loaded yet';
+      knowledgeArticlesCount.style.fontWeight = 'normal';
+    }
+  } catch (error) {
+    console.error('Error updating knowledge articles count:', error);
+    knowledgeArticlesCount.textContent = '';
+  }
+}
+
+/**
+ * Reload knowledge files from the bundled /knowledge folder.
+ * @param {Object} [options]
+ * @param {boolean} [options.force=false] - Force re-ingest of all files
+ * @param {boolean} [options.silent=false] - Suppress status messages when nothing changed
+ */
+async function handleReloadKnowledge({ force = false, silent = false } = {}) {
+  knowledgeStatus.textContent = '⏳ Loading knowledge files…';
+  knowledgeStatus.style.color = '#555';
+  reloadKnowledgeBtn.disabled = true;
+
+  try {
+    const result = await KnowledgeLoader.loadKnowledgeFiles({ force });
+
+    if (result.ok) {
+      const parts = [];
+      if (result.loaded > 0) {
+        parts.push(`✅ Loaded ${result.loaded} file${result.loaded === 1 ? '' : 's'}`);
+      }
+      if (result.skipped > 0) {
+        parts.push(`${result.skipped} already up-to-date`);
+      }
+      if (result.errors.length > 0) {
+        parts.push(`⚠️ ${result.errors.length} error${result.errors.length === 1 ? '' : 's'}`);
+        result.errors.forEach(e => console.warn(`KnowledgeLoader error – ${e.file}: ${e.error}`));
+      }
+
+      const msg = parts.join(' · ') || 'No files listed in index.json';
+      if (!silent || result.loaded > 0 || result.errors.length > 0) {
+        knowledgeStatus.textContent = msg;
+        knowledgeStatus.style.color = result.errors.length > 0 ? '#b45309' : '#166534';
+      } else {
+        knowledgeStatus.textContent = '';
+      }
+    } else {
+      knowledgeStatus.textContent = `⚠️ ${result.errors[0]?.error || 'Failed to load knowledge files'}`;
+      knowledgeStatus.style.color = '#dc2626';
+    }
+
+    await updateKnowledgeArticlesCount();
+  } catch (error) {
+    console.error('Error reloading knowledge:', error);
+    knowledgeStatus.textContent = `❌ Error: ${error.message}`;
+    knowledgeStatus.style.color = '#dc2626';
+  } finally {
+    reloadKnowledgeBtn.disabled = false;
+  }
+}
+
+// Handle clear knowledge articles
+async function handleClearKnowledge() {
+  if (!confirm('Delete all knowledge base articles? They can be reloaded by clicking "Reload Knowledge".')) {
+    return;
+  }
+
+  try {
+    const result = await Articles.clearKnowledgeArticles();
+    if (result.success) {
+      knowledgeStatus.textContent = `🗑️ ${result.message}`;
+      knowledgeStatus.style.color = '#166534';
+    } else {
+      knowledgeStatus.textContent = `❌ ${result.message}`;
+      knowledgeStatus.style.color = '#dc2626';
+    }
+    await updateKnowledgeArticlesCount();
+  } catch (error) {
+    console.error('Error clearing knowledge articles:', error);
+    knowledgeStatus.textContent = `❌ Error: ${error.message}`;
+    knowledgeStatus.style.color = '#dc2626';
   }
 }
 

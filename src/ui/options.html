@@ -265,6 +265,29 @@
           </div>
         </section>
 
+        <!-- Knowledge Base Section -->
+        <section class="settings-section">
+          <h2 class="section-title">📚 Knowledge Base</h2>
+
+          <p class="help-text">
+            Files placed in the <code>knowledge/</code> folder of this extension are automatically
+            ingested here. Add files to that folder and list them in
+            <code>knowledge/index.json</code> — then click <strong>Reload Knowledge</strong>.
+          </p>
+
+          <div class="button-group">
+            <button type="button" class="btn btn-primary" id="reloadKnowledgeBtn">
+              🔄 Reload Knowledge
+            </button>
+            <button type="button" class="btn btn-secondary" id="clearKnowledgeBtn">
+              🗑️ Clear Knowledge Articles
+            </button>
+          </div>
+
+          <div id="knowledgeStatus" style="margin-top: 10px;"></div>
+          <div id="knowledgeArticlesCount" style="margin-top: 10px; color: #666;"></div>
+        </section>
+
         <!-- Upload Articles Section -->
         <section class="settings-section">
           <h2 class="section-title">📤 Upload Articles</h2>
@@ -344,6 +367,7 @@
   <script src="../lib/articles.js"></script>
   <script src="../lib/parser_strategies.js"></script>
   <script src="../lib/ingestion.js"></script>
+  <script src="../lib/knowledge_loader.js"></script>
   <script src="options.js"></script>
 </body>
 </html>
