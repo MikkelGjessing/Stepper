@@ -72,11 +72,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load dummy articles if needed
   await Articles.loadDummyArticlesIfNeeded();
 
-  // Load knowledge files (text-based formats only; DOCX/PDF require the
-  // options page where mammoth and pdf.js are available).
-  KnowledgeLoader.loadKnowledgeFiles().catch(e =>
-    console.warn('KnowledgeLoader: background load failed', e)
-  );
+  // Load knowledge files only when the feature flag is enabled (default: OFF).
+  // This prevents startup failures if knowledge/index.json or parser deps are missing.
+  if (currentSettings && currentSettings.enableBundledKnowledge && typeof KnowledgeLoader !== 'undefined') {
+    KnowledgeLoader.loadKnowledgeFiles().catch(e =>
+      console.warn('KnowledgeLoader: background load failed', e)
+    );
+  }
 
   // Load articles
   await loadArticles();
