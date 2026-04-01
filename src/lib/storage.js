@@ -151,6 +151,7 @@ const Storage = {
       azureApiBaseUrl: '',
       azurePat: '',
       enableDummyArticles: true,
+      enableBundledKnowledge: false,
       enableLLMSearch: false,
       llmEndpoint: '',
       llmApiKey: '',

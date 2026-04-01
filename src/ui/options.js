@@ -71,13 +71,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   await updateSnInfo();
   await updateKnowledgeArticlesCount();
   setupEventListeners();
-  // Auto-load knowledge files (force=true so settings page always re-ingests
-  // the bundled files, picking up any updates committed to the knowledge folder).
-  // Run in the background so the page stays responsive; errors are surfaced via
-  // the knowledgeStatus element inside the function.
-  handleReloadKnowledge({ silent: true }).catch(e =>
-    console.error('Knowledge auto-load failed', e)
-  );
 });
 
 // Setup event listeners
