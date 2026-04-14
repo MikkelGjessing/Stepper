@@ -57,6 +57,8 @@ const formFields = {
   chatBackendUrl: document.getElementById('chatBackendUrl'),
   allowCurrentArticleChat: document.getElementById('allowCurrentArticleChat'),
   allowKnowledgeBaseChat: document.getElementById('allowKnowledgeBaseChat'),
+  enableAnalytics: document.getElementById('enableAnalytics'),
+  analyticsBaseUrl: document.getElementById('analyticsBaseUrl'),
   llmEndpoint: document.getElementById('llmEndpoint'),
   llmApiKey: document.getElementById('llmApiKey'),
   llmModel: document.getElementById('llmModel')
@@ -84,6 +86,9 @@ function setupEventListeners() {
 
   // Chat toggle
   formFields.enableChat.addEventListener('change', toggleChatFields);
+
+  // Analytics toggle
+  formFields.enableAnalytics.addEventListener('change', toggleAnalyticsFields);
 
   // ServiceNow toggle
   snEnabled.addEventListener('change', toggleSnFields);
@@ -144,6 +149,8 @@ async function loadSettings() {
     formFields.chatBackendUrl.value = settings.chatBackendUrl || '';
     formFields.allowCurrentArticleChat.checked = settings.allowCurrentArticleChat !== false;
     formFields.allowKnowledgeBaseChat.checked = settings.allowKnowledgeBaseChat !== false;
+    formFields.enableAnalytics.checked = settings.enableAnalytics === true;
+    formFields.analyticsBaseUrl.value = settings.analyticsBaseUrl || 'http://localhost:5001';
     formFields.llmEndpoint.value = settings.llmEndpoint || '';
     formFields.llmApiKey.value = settings.llmApiKey || '';
     formFields.llmModel.value = settings.llmModel || 'gpt-3.5-turbo';
@@ -163,6 +170,7 @@ async function loadSettings() {
     
     toggleLLMSection();
     toggleChatFields();
+    toggleAnalyticsFields();
     
   } catch (error) {
     console.error('Error loading settings:', error);
@@ -207,6 +215,14 @@ function toggleChatFields() {
   }
 }
 
+// Toggle Analytics fields
+function toggleAnalyticsFields() {
+  const analyticsFields = document.getElementById('analyticsFields');
+  if (analyticsFields) {
+    analyticsFields.style.display = formFields.enableAnalytics.checked ? 'block' : 'none';
+  }
+}
+
 // Handle save settings
 async function handleSaveSettings(event) {
   event.preventDefault();
@@ -231,6 +247,8 @@ async function handleSaveSettings(event) {
       chatBackendUrl: formFields.chatBackendUrl.value.trim(),
       allowCurrentArticleChat: formFields.allowCurrentArticleChat.checked,
       allowKnowledgeBaseChat: formFields.allowKnowledgeBaseChat.checked,
+      enableAnalytics: formFields.enableAnalytics.checked,
+      analyticsBaseUrl: formFields.analyticsBaseUrl.value.trim() || 'http://localhost:5001',
       llmEndpoint: formFields.llmEndpoint.value.trim(),
       llmApiKey: formFields.llmApiKey.value.trim(),
       llmModel: formFields.llmModel.value.trim() || 'gpt-3.5-turbo',

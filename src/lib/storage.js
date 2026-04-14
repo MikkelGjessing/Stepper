@@ -161,6 +161,8 @@ const Storage = {
       chatBackendUrl: '',
       allowCurrentArticleChat: true,
       allowKnowledgeBaseChat: true,
+      enableAnalytics: false,
+      analyticsBaseUrl: 'http://localhost:5001',
       serviceNow: defaultServiceNowSettings()
     };
     try {
