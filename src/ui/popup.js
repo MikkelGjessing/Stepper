@@ -349,6 +349,8 @@ async function handleConfirmStartCase() {
   caseState = CASE_STATE.ACTIVE;
   await saveCaseState();
 
+  if (typeof Analytics !== 'undefined') Analytics.track('case_start');
+
   applyCaseState();
   if (searchInput) searchInput.focus();
 }
@@ -413,6 +415,14 @@ async function handleCopyCaseSummary() {
 async function handleCloseConcludeCase() {
   const modal = document.getElementById('caseConcludeModal');
   if (modal) modal.style.display = 'none';
+
+  const completedCount = activeCase && activeCase.completedInstructions
+    ? activeCase.completedInstructions.length
+    : 0;
+
+  if (typeof Analytics !== 'undefined') {
+    Analytics.track('case_conclude', { completedInstructionCount: completedCount });
+  }
 
   // Clear case state
   activeCase = null;
@@ -500,6 +510,9 @@ async function loadSettings() {
     currentSettings = await Storage.getSettings();
     // Note: Not logging settings to avoid exposing secrets like PAT and API keys
     // Articles.getAllArticles() internally calls Storage.getSettings() to respect enableDummyArticles
+    if (typeof Analytics !== 'undefined') {
+      Analytics.init(currentSettings);
+    }
   } catch (error) {
     console.error('Error loading settings:', error);
     currentSettings = {};
@@ -631,11 +644,17 @@ async function handleSearch() {
   try {
     // Use the new searchArticles function with settings
     const results = await Search.searchArticles(query, currentArticles, currentSettings);
+    if (typeof Analytics !== 'undefined') {
+      Analytics.track('search', { resultCount: results ? results.length : 0 });
+    }
     displayResults(results);
   } catch (error) {
     console.error('Search error:', error);
     // Fallback to keyword search on error
     const results = Search.search(query, currentArticles);
+    if (typeof Analytics !== 'undefined') {
+      Analytics.track('search', { resultCount: results ? results.length : 0 });
+    }
     displayResults(results);
   }
 }
@@ -708,6 +727,10 @@ async function displayArticle(articleId) {
   
   currentSelectedArticle = article;
   currentStepIndex = 0; // Start at first step
+
+  if (typeof Analytics !== 'undefined') {
+    Analytics.track('article_open', { articleId: article.id });
+  }
   
   // Check if article has steps
   const steps = article.steps && Array.isArray(article.steps) && article.steps.length > 0 
@@ -1143,6 +1166,14 @@ async function handleStepContinue() {
   // Mark current step as completed
   await markStepCompleted(article.id, currentStepIndex);
   
+  if (typeof Analytics !== 'undefined') {
+    Analytics.track('step_complete', {
+      articleId: article.id,
+      stepIndex: currentStepIndex,
+      totalSteps
+    });
+  }
+
   // Check if all steps are now completed
   const completionState = getCompletionState(article.id);
   if (areAllStepsCompleted(completionState, totalSteps) && !completionState.completedAt) {
@@ -1172,6 +1203,10 @@ async function handleCompleteProcess() {
   
   // Mark article as completed with timestamp
   await markArticleCompleted(article.id);
+
+  if (typeof Analytics !== 'undefined') {
+    Analytics.track('article_complete', { articleId: article.id });
+  }
 
   // If a case is active, record this instruction in the case and return to search
   if (caseState === CASE_STATE.ACTIVE) {

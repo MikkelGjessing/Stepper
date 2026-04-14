@@ -227,6 +227,32 @@
           </div>
         </section>
 
+        <!-- Analytics Section -->
+        <section class="settings-section">
+          <h2 class="section-title">📊 Analytics</h2>
+
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="enableAnalytics" class="checkbox">
+              <span>Enable usage analytics</span>
+            </label>
+            <span class="help-text">Send anonymous usage events to the Surdej Stepper analytics endpoint. Analytics never block normal extension functionality.</span>
+          </div>
+
+          <div id="analyticsFields" style="display: none;">
+            <div class="form-group">
+              <label class="label" for="analyticsBaseUrl">Analytics base URL</label>
+              <input
+                type="url"
+                id="analyticsBaseUrl"
+                class="input"
+                placeholder="http://localhost:5001"
+              />
+              <span class="help-text">Base URL of the Surdej Stepper analytics endpoint (without path). Events are posted to <code>{Base URL}/api/module/member-stepper/events</code>.</span>
+            </div>
+          </div>
+        </section>
+
         <!-- LLM Configuration Section -->
         <section class="settings-section" id="llmSection" style="display: none;">
           <h2 class="section-title">🤖 LLM Configuration</h2>
