@@ -64,11 +64,11 @@ const Analytics = (() => {
   }
 
   function _flush() {
-    if (_queue.length === 0) return;
-    if (!_baseUrl) return;
+    if (_queue.length === 0) return Promise.resolve();
+    if (!_baseUrl) return Promise.resolve();
     const batch = _queue.splice(0); // drain queue atomically before the async call
     try {
-      fetch(`${_baseUrl}/api/module/member-stepper/events`, {
+      return fetch(`${_baseUrl}/api/module/member-stepper/events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ events: batch }),
@@ -78,10 +78,29 @@ const Analytics = (() => {
       });
     } catch (_) {
       // Never propagate errors from analytics
+      return Promise.resolve();
     }
   }
 
-  return { init, track };
+  /**
+   * Immediately flush all queued analytics events.
+   * Returns a Promise that resolves when the flush attempt completes (success or failure).
+   * Accepts an optional context object for logging purposes.
+   * @param {Object} [context] - Optional context, e.g. { reason: 'process_completed' }
+   * @returns {Promise<void>}
+   */
+  function flushAnalyticsQueue(context) {
+    if (_flushTimer !== null) {
+      clearTimeout(_flushTimer);
+      _flushTimer = null;
+    }
+    if (context && context.reason) {
+      // Context is available for future logging / telemetry if needed
+    }
+    return _flush();
+  }
+
+  return { init, track, flushAnalyticsQueue };
 })();
 
 // Expose globally so popup.js and options.js can use it without module bundling

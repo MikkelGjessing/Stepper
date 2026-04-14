@@ -33,6 +33,7 @@ let storageChangeUnsubscribe = null;
 let currentSettings = null;
 let articleCompletionStates = {}; // { articleId: { completedStepIndexes: [], completedAt?: string } }
 let hasSearched = false; // Track if user has performed a search
+let _articleStartedAt = null; // Timestamp (ms) when the current article was opened
 
 // DOM Elements
 const searchInput = document.getElementById('searchInput');
@@ -727,6 +728,7 @@ async function displayArticle(articleId) {
   
   currentSelectedArticle = article;
   currentStepIndex = 0; // Start at first step
+  _articleStartedAt = Date.now();
 
   if (typeof Analytics !== 'undefined') {
     Analytics.track('article_open', { articleId: article.id });
@@ -1190,37 +1192,68 @@ async function handleStepContinue() {
 /**
  * Handle Complete Process button on the last step
  * Marks the last step as completed, sets completedAt timestamp.
+ * Flushes analytics immediately before continuing to completion summary.
  * If a case is active, adds the instruction to the case record and returns to search view.
  * Otherwise shows the article-level completion summary.
  */
 async function handleCompleteProcess() {
   if (!currentSelectedArticle) return;
-  
+
   const article = currentSelectedArticle;
-  
-  // Mark the last step as completed (if not already)
-  await markStepCompleted(article.id, currentStepIndex);
-  
-  // Mark article as completed with timestamp
-  await markArticleCompleted(article.id);
 
-  if (typeof Analytics !== 'undefined') {
-    Analytics.track('article_complete', { articleId: article.id });
+  // Prevent double-clicks: disable the button while processing
+  const completeProcessBtn = document.getElementById('completeProcessBtn');
+  if (completeProcessBtn) {
+    if (completeProcessBtn.disabled) return;
+    completeProcessBtn.disabled = true;
   }
 
-  // If a case is active, record this instruction in the case and return to search
-  if (caseState === CASE_STATE.ACTIVE) {
-    await addCompletedInstructionToCase(article.id, article.title);
-    // Return to search/case view and refresh the completed instructions list
-    setView(UI_STATE.SEARCH);
-    renderCaseActiveOverview();
-    if (searchInput) searchInput.focus();
-    return;
+  try {
+    // Mark the last step as completed (if not already)
+    await markStepCompleted(article.id, currentStepIndex);
+
+    // Mark article as completed with timestamp
+    await markArticleCompleted(article.id);
+
+    if (typeof Analytics !== 'undefined') {
+      const durationMs = _articleStartedAt !== null ? Date.now() - _articleStartedAt : undefined;
+      _articleStartedAt = null;
+
+      Analytics.track('flow_completed', { articleId: article.id });
+      Analytics.track('article_complete', { articleId: article.id });
+      if (durationMs !== undefined) {
+        Analytics.track('instruction_completion', { articleId: article.id, durationMs });
+      }
+
+      // Flush immediately so completion events are delivered reliably
+      const FLUSH_TIMEOUT_MS = 3000;
+      try {
+        await Promise.race([
+          Analytics.flushAnalyticsQueue({ reason: 'process_completed' }),
+          new Promise(resolve => setTimeout(resolve, FLUSH_TIMEOUT_MS))
+        ]);
+      } catch (err) {
+        console.warn('Analytics flush failed on process completion', err);
+      }
+    }
+
+    // If a case is active, record this instruction in the case and return to search
+    if (caseState === CASE_STATE.ACTIVE) {
+      await addCompletedInstructionToCase(article.id, article.title);
+      // Return to search/case view and refresh the completed instructions list
+      setView(UI_STATE.SEARCH);
+      renderCaseActiveOverview();
+      if (searchInput) searchInput.focus();
+      return;
+    }
+
+    // No active case – show the article-level completion summary as before
+    setView(UI_STATE.COMPLETE);
+    renderCompleteView();
+  } finally {
+    // Re-enable the button in case of an unexpected error (no-op if view has changed)
+    if (completeProcessBtn) completeProcessBtn.disabled = false;
   }
-  
-  // No active case – show the article-level completion summary as before
-  setView(UI_STATE.COMPLETE);
-  renderCompleteView();
 }
 
 /**
