@@ -433,7 +433,7 @@ const JsonKnowledgeImporter = {
     }
 
     return {
-      body: selected.body || '',
+      body: selected.body,
       isHtml: Boolean(selected.isHtml),
       selectedField,
       candidateFieldsFound
@@ -461,7 +461,9 @@ const JsonKnowledgeImporter = {
       seen.add(value);
 
       // ServiceNow-like display/value object.
-      if (Object.prototype.hasOwnProperty.call(value, 'value') || Object.prototype.hasOwnProperty.call(value, 'display_value')) {
+      const hasValue = Object.prototype.hasOwnProperty.call(value, 'value');
+      const hasDisplayValue = Object.prototype.hasOwnProperty.call(value, 'display_value');
+      if (hasValue || hasDisplayValue) {
         const valuePart = this._extractContentValue(value.value, seen);
         const displayPart = this._extractContentValue(value.display_value, seen);
         const valueLen = this._contentLength(valuePart.body);
@@ -506,14 +508,17 @@ const JsonKnowledgeImporter = {
         body: parts.map((part) => {
           if (part.isHtml) return part.body;
           const escaped = Articles.escapeHtml(part.body);
-          return `<p>${escaped.replace(/\n/g, '<br>')}</p>`;
+          return escaped
+            .split(/\n{2,}/)
+            .map((block) => `<p>${block.replace(/\n/g, '<br>')}</p>`)
+            .join('\n');
         }).join('\n'),
         isHtml: true
       };
     }
 
     return {
-      body: parts.map(part => part.body).join('\n\n').trim(),
+      body: parts.map(part => part.body).join('\n\n'),
       isHtml: false
     };
   },
