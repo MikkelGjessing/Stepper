@@ -314,6 +314,30 @@
           <div id="knowledgeArticlesCount" style="margin-top: 10px; color: #666;"></div>
         </section>
 
+        <!-- Bundled JSON Knowledge Section -->
+        <section class="settings-section">
+          <h2 class="section-title">📦 Bundled JSON Knowledge</h2>
+
+          <p class="help-text">
+            Place a JSON file at <code>knowledge-json/articles.json</code> in the extension folder,
+            then click <strong>Import</strong> to load all articles into the knowledge base.
+            See <code>knowledge-json/README.md</code> for the supported file format.
+            Images are not required.
+          </p>
+
+          <div class="button-group">
+            <button type="button" class="btn btn-primary" id="importJsonKnowledgeBtn">
+              📥 Import bundled JSON knowledge
+            </button>
+            <button type="button" class="btn btn-secondary" id="clearJsonKnowledgeBtn">
+              🗑️ Clear bundled JSON articles
+            </button>
+          </div>
+
+          <div id="jsonKnowledgeStatus" style="margin-top: 10px;"></div>
+          <div id="jsonKnowledgeCount" style="margin-top: 6px; color: #666; font-size: 13px;"></div>
+        </section>
+
         <!-- Upload Articles Section -->
         <section class="settings-section">
           <h2 class="section-title">📤 Upload Articles</h2>
@@ -394,6 +418,7 @@
   <script src="../lib/parser_strategies.js"></script>
   <script src="../lib/ingestion.js"></script>
   <script src="../lib/knowledge_loader.js"></script>
+  <script src="../lib/json_knowledge_importer.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

@@ -36,7 +36,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["knowledge/*"],
+      "resources": ["knowledge/*", "knowledge-json/*"],
       "matches": ["<all_urls>"]
     }
   ]

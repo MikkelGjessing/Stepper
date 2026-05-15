@@ -32,7 +32,12 @@ const syncRepoBtn = document.getElementById('syncRepoBtn');
 const syncStatus = document.getElementById('syncStatus');
 const repoArticlesCount = document.getElementById('repoArticlesCount');
 
-// ServiceNow DOM elements
+const importJsonKnowledgeBtn = document.getElementById('importJsonKnowledgeBtn');
+const clearJsonKnowledgeBtn = document.getElementById('clearJsonKnowledgeBtn');
+const jsonKnowledgeStatus = document.getElementById('jsonKnowledgeStatus');
+const jsonKnowledgeCount = document.getElementById('jsonKnowledgeCount');
+
+
 const snEnabled = document.getElementById('snEnabled');
 const snFields = document.getElementById('snFields');
 const snBaseUrl = document.getElementById('snBaseUrl');
@@ -72,6 +77,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await updateRepoArticlesCount();
   await updateSnInfo();
   await updateKnowledgeArticlesCount();
+  await updateJsonKnowledgeCount();
   setupEventListeners();
 });
 
@@ -119,6 +125,10 @@ function setupEventListeners() {
   // Knowledge base actions
   reloadKnowledgeBtn.addEventListener('click', () => handleReloadKnowledge({ force: true }));
   clearKnowledgeBtn.addEventListener('click', handleClearKnowledge);
+
+  // Bundled JSON knowledge actions
+  importJsonKnowledgeBtn.addEventListener('click', handleImportJsonKnowledge);
+  clearJsonKnowledgeBtn.addEventListener('click', handleClearJsonKnowledge);
 
   // Sync repository
   syncRepoBtn.addEventListener('click', handleSyncRepo);
@@ -1032,4 +1042,97 @@ function showSyncStatus(message, type = 'info') {
   setTimeout(() => {
     syncStatus.textContent = '';
   }, 8000);
+}
+
+// ── Bundled JSON Knowledge handlers ──────────────────────────────────────────
+
+/** Import knowledge-json/articles.json into the knowledge base */
+async function handleImportJsonKnowledge() {
+  importJsonKnowledgeBtn.disabled = true;
+  importJsonKnowledgeBtn.textContent = '⏳ Importing…';
+  showJsonKnowledgeStatus('Starting import…', 'info');
+
+  try {
+    const result = await JsonKnowledgeImporter.loadBundledJsonKnowledge(
+      ({ imported, total, skipped }) => {
+        const pct = total > 0 ? Math.round((imported / total) * 100) : 0;
+        showJsonKnowledgeStatus(
+          `Importing… ${imported} / ${total} articles (${pct}%)`,
+          'info',
+          false  // don't auto-clear while in progress
+        );
+      }
+    );
+
+    if (result.ok) {
+      const icon = result.imported > 0 ? '✅' : 'ℹ️';
+      showJsonKnowledgeStatus(`${icon} ${result.message}`, 'success');
+    } else {
+      showJsonKnowledgeStatus(`❌ ${result.message}`, 'error');
+    }
+
+    await updateJsonKnowledgeCount();
+  } catch (err) {
+    console.error('[Options] handleImportJsonKnowledge error:', err);
+    showJsonKnowledgeStatus(`❌ Unexpected error: ${err.message}`, 'error');
+  } finally {
+    importJsonKnowledgeBtn.disabled = false;
+    importJsonKnowledgeBtn.textContent = '📥 Import bundled JSON knowledge';
+  }
+}
+
+/** Delete all bundled_json articles from storage */
+async function handleClearJsonKnowledge() {
+  if (!confirm('Delete all bundled JSON knowledge articles? They can be re-imported by clicking Import.')) {
+    return;
+  }
+
+  try {
+    const result = await JsonKnowledgeImporter.clearBundledJsonArticles();
+    if (result.success) {
+      showJsonKnowledgeStatus(`🗑️ ${result.message}`, 'success');
+    } else {
+      showJsonKnowledgeStatus(`❌ ${result.message}`, 'error');
+    }
+    await updateJsonKnowledgeCount();
+  } catch (err) {
+    console.error('[Options] handleClearJsonKnowledge error:', err);
+    showJsonKnowledgeStatus(`❌ Error: ${err.message}`, 'error');
+  }
+}
+
+/** Display a status message in the JSON knowledge section */
+let _jsonKnowledgeStatusTimer = null;
+function showJsonKnowledgeStatus(message, type = 'info', autoClear = true) {
+  if (_jsonKnowledgeStatusTimer !== null) {
+    clearTimeout(_jsonKnowledgeStatusTimer);
+    _jsonKnowledgeStatusTimer = null;
+  }
+  jsonKnowledgeStatus.textContent = message;
+  jsonKnowledgeStatus.style.color =
+    type === 'success' ? '#28a745' :
+    type === 'error'   ? '#dc3545' :
+    '#555';
+  jsonKnowledgeStatus.style.fontWeight = '500';
+
+  if (autoClear) {
+    _jsonKnowledgeStatusTimer = setTimeout(() => {
+      jsonKnowledgeStatus.textContent = '';
+      _jsonKnowledgeStatusTimer = null;
+    }, 10000);
+  }
+}
+
+/** Refresh the article count display for the JSON knowledge section */
+async function updateJsonKnowledgeCount() {
+  try {
+    const count = await JsonKnowledgeImporter.getBundledJsonArticlesCount();
+    if (count > 0) {
+      jsonKnowledgeCount.textContent = `📊 ${count} bundled JSON article${count === 1 ? '' : 's'} loaded`;
+    } else {
+      jsonKnowledgeCount.textContent = 'No bundled JSON articles loaded yet';
+    }
+  } catch (_) {
+    jsonKnowledgeCount.textContent = '';
+  }
 }
