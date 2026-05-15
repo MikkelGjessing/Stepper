@@ -18,6 +18,7 @@ const JsonKnowledgeImporter = {
   /** Number of articles to parse per microtask yield. */
   BATCH_SIZE: 50,
   DIAGNOSTIC_RECORD_LIMIT: 3,
+  PREVIEW_MAX_LENGTH: 120,
 
   BODY_FIELD_CANDIDATES: [
     'body',
@@ -227,12 +228,12 @@ const JsonKnowledgeImporter = {
       for (const field of this.BODY_FIELD_CANDIDATES) {
         bodyCandidates[field] = this._previewValue(raw[field]);
       }
-      console.log('JSON article keys', availableKeys);
-      console.log('Title field used', titleResult.fieldUsed);
-      console.log('Body candidates', bodyCandidates);
-      console.log('Candidate body fields found', bodyResult.candidateFieldsFound);
-      console.log('Selected body field', bodyResult.selectedField || '(none)');
-      console.log('Selected body length', bodyResult.body.length);
+      console.log('[JsonKnowledgeImporter] JSON article keys', availableKeys);
+      console.log('[JsonKnowledgeImporter] Title field used', titleResult.fieldUsed);
+      console.log('[JsonKnowledgeImporter] Body candidates', bodyCandidates);
+      console.log('[JsonKnowledgeImporter] Candidate body fields found', bodyResult.candidateFieldsFound);
+      console.log('[JsonKnowledgeImporter] Selected body field', bodyResult.selectedField || '(none)');
+      console.log('[JsonKnowledgeImporter] Selected body length', bodyResult.body.length);
     }
 
     // Summary
@@ -473,25 +474,7 @@ const JsonKnowledgeImporter = {
       }
 
       // Common content-block object keys.
-      const objectFieldPriority = [
-        'body',
-        'bodyHtml',
-        'body_html',
-        'text',
-        'html',
-        'content',
-        'article',
-        'articleBody',
-        'article_body',
-        'description',
-        'procedure',
-        'instructions',
-        'workInstructions',
-        'work_instructions',
-        'comments',
-        'knowledgeArticle',
-        'knowledge_article'
-      ];
+      const objectFieldPriority = this.BODY_FIELD_CANDIDATES;
       for (const key of objectFieldPriority) {
         if (Object.prototype.hasOwnProperty.call(value, key)) {
           const nested = this._extractContentValue(value[key], seen);
@@ -558,8 +541,8 @@ const JsonKnowledgeImporter = {
   _previewValue(value) {
     const extracted = this._extractContentValue(value, new WeakSet());
     if (!extracted.body) return null;
-    return extracted.body.length > 120
-      ? `${extracted.body.substring(0, 120)}…`
+    return extracted.body.length > this.PREVIEW_MAX_LENGTH
+      ? `${extracted.body.substring(0, this.PREVIEW_MAX_LENGTH)}…`
       : extracted.body;
   },
 
