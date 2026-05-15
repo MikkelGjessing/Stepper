@@ -157,7 +157,7 @@ const JsonKnowledgeImporter = {
     const rawHtml =
       raw.body        || raw.bodyHtml   || raw.text  ||
       raw.html        || raw.content    || raw.article ||
-      raw.procedure   || '';
+      raw.procedure   || raw.description || '';
 
     // Plain-text fallback (used only when all HTML fields are empty)
     const rawText = typeof rawHtml === 'string' ? rawHtml : String(rawHtml || '');

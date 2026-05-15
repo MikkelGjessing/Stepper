@@ -37,7 +37,6 @@ const clearJsonKnowledgeBtn = document.getElementById('clearJsonKnowledgeBtn');
 const jsonKnowledgeStatus = document.getElementById('jsonKnowledgeStatus');
 const jsonKnowledgeCount = document.getElementById('jsonKnowledgeCount');
 
-
 const snEnabled = document.getElementById('snEnabled');
 const snFields = document.getElementById('snFields');
 const snBaseUrl = document.getElementById('snBaseUrl');
