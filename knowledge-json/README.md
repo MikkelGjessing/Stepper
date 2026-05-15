@@ -68,7 +68,7 @@ The importer accepts three shapes:
 |----------|------------------------------------------|
 | ID       | `id`, `articleId`, `sys_id`, `number`, `kb_number` |
 | Title    | `title`, `articleTitle`, `short_description`, `name`, `heading` |
-| Body     | `body`, `bodyHtml`, `text`, `html`, `content`, `description`, `article`, `procedure` |
+| Body     | `body`, `bodyHtml`, `text`, `html`, `content`, `article`, `procedure`, `description` |
 | Summary  | `summary`, `description`, `short_description` |
 | Tags     | `tags`, `keywords`, `sys_tags` |
 
