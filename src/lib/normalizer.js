@@ -32,7 +32,7 @@ const ArticleNormalizer = {
    * @returns {boolean}
    */
   isProcedureSectionHeading(text) {
-    return /^(?:\d+\.\s*)?(?:procedure|instructions?|steps?\b|how\s+to\b|process\b|work\s+instructions?)/i
+    return /^(?:\d+\.\s*)?(?:procedure(?:\s*\(how\s*to\))?|instructions?|steps?\b|how\s+to\b|process\b|work\s+instructions?|action\b|resolution\b)/i
       .test(text.trim());
   },
 
@@ -43,7 +43,7 @@ const ArticleNormalizer = {
    * @returns {boolean}
    */
   isSkipSectionHeading(text) {
-    return /^(?:\d+\.\s*)?(?:related\s+(?:information|articles?|links?)|change\s+(?:log|histor(?:y|ies))|revision\s+histor(?:y|ies)|appendix)/i
+    return /^(?:\d+\.\s*)?(?:related\s+(?:information|articles?|links?)|change\s+(?:log|histor(?:y|ies))|revision\s+histor(?:y|ies)|appendix|general\s+info(?:rmation)?|audience\b|skills?\b|prerequisites?\b|keywords?\b|tags?\b)/i
       .test(text.trim());
   },
 
