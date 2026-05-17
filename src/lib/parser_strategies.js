@@ -10,7 +10,10 @@
  *   6) fallbackSingleStepParser
  */
 
+// Allow longer procedural titles so imported steps are not over-truncated.
 const MAX_TITLE_LENGTH = 140;
+const MIN_BODY_LENGTH_WITH_NOISE_TITLE = 20;
+const MAX_TAG_BLOCK_LENGTH = 120;
 
 const STRATEGY_PRIORITY = {
   procedureTableParser: 1,
@@ -25,6 +28,13 @@ const ACTION_VERBS = [
   'Open', 'Click', 'Select', 'Enter', 'Type', 'Choose', 'Go to', 'Navigate', 'Press',
   'Confirm', 'Save', 'Search', 'Find', 'Copy', 'Paste', 'Check', 'Verify', 'Ensure'
 ];
+const ACTION_VERB_REGEX = new RegExp(
+  `^(?:${ACTION_VERBS
+    .map(v => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .sort((a, b) => b.length - a.length)
+    .join('|')})\\b`,
+  'i'
+);
 
 function _tmpDiv(html) {
   const div = document.createElement('div');
@@ -56,7 +66,7 @@ function _stripHtml(html) {
 function _isLikelyNoise(text) {
   const t = (text || '').trim();
   if (!t) return true;
-  if (/^(?:step|step\s*\d+|\d+|#)$/i.test(t)) return true;
+  if (/^(?:step(?:\s*\d+)?|\d+|#)$/i.test(t)) return true;
   if (/^(?:keywords?|tags?)\s*[:\-]?$/i.test(t)) return true;
   if (/^(?:change\s+log|revision\s+history)\s*[:\-]?$/i.test(t)) return true;
   return false;
@@ -66,10 +76,11 @@ function _isCredibleStep(step) {
   if (!step || typeof step !== 'object') return false;
   const bodyText = _stripHtml(step.bodyHtml).trim();
   const title = (step.title || '').trim();
-  if (!bodyText && (!Array.isArray(step.images) || step.images.length === 0)) return false;
-  if (_isLikelyNoise(title) && bodyText.length < 20) return false;
+  const hasImages = Array.isArray(step.images) && step.images.length > 0;
+  if (!bodyText && !hasImages) return false;
+  if (_isLikelyNoise(title) && bodyText.length < MIN_BODY_LENGTH_WITH_NOISE_TITLE) return false;
   if (/^(?:change\s+log|revision\s+history)$/i.test(bodyText)) return false;
-  if (/^(?:keywords?|tags?)\s*[:\-]?\s*[\w\s,;|_-]+$/i.test(bodyText) && bodyText.length < 120) return false;
+  if (/^(?:keywords?|tags?)\s*[:\-]?\s*[\w\s,;|_-]+$/i.test(bodyText) && bodyText.length < MAX_TAG_BLOCK_LENGTH) return false;
   return true;
 }
 
@@ -84,7 +95,7 @@ function _finalizeSteps(steps, parserName) {
 
   const credible = normalized.filter(_isCredibleStep);
   if (credible.length > 0) {
-    return credible.map((step, i) => ({ ...step, index: i + 1, displayNumber: step.displayNumber || i + 1 }));
+    return credible.map((step, i) => ({ ...step, index: i + 1 }));
   }
   return normalized;
 }
@@ -97,7 +108,6 @@ function _buildParserMeta(parserName, parserScore, selectionReasons, normalizedA
   return {
     parserName,
     parserScore,
-    parserWarnings: Array.isArray(warnings) ? warnings : [],
     parsingWarnings: Array.isArray(warnings) ? warnings : [],
     stepCount: steps.length,
     selectionReasons: Array.isArray(selectionReasons) ? selectionReasons : [],
@@ -156,7 +166,7 @@ const procedureTableParser = {
     if (tables.length === 0) return { score: 0, reasons: ['no procedure table found'] };
 
     const STEP_COL = /^(?:step|no\.?|#|nr\.?|step\s*#)$/i;
-    const ACTION_COL = /^(?:action|instruction|task|description|details?|image\s*&\s*details?|image\s+and\s+details|what\s+to\s+do)$/i;
+    const ACTION_COL = /^(?:action|instruction|task|description|details?|image\s*(?:&|and)\s*details?|what\s+to\s+do)$/i;
 
     let best = 0;
     for (const table of tables) {
@@ -204,7 +214,7 @@ const explicitStepParser = {
     const container = _tmpDiv(_extractPreferredProcedureHtml(normalizedArticle));
     const blocks = Array.from(container.querySelectorAll('p, h1, h2, h3, h4, h5, h6'));
 
-    const explicitMarkers = blocks.filter(el => /^(?:Step|STEP)\s*\d+(?:\s*[:\-–]|\s*$)/i.test(el.textContent.trim()));
+    const explicitMarkers = blocks.filter(el => /^step\s*\d+(?:\s*[:\-–]|\s*$)/i.test(el.textContent.trim()));
     if (explicitMarkers.length >= 2) {
       reasons.push(`${explicitMarkers.length} explicit Step N markers`);
       return { score: 92, reasons };
@@ -220,7 +230,7 @@ const explicitStepParser = {
       return { score: 58, reasons };
     }
 
-    return { score: 0, reasons: ['no explicit step markers found'] };
+    return { score: 0, reasons: ['no explicit step markers or numbered paragraphs found'] };
   },
 
   parse(normalizedArticle) {
@@ -259,7 +269,7 @@ const numberedListParser = {
       return { score: 76, reasons };
     }
 
-    return { score: 0, reasons: ['no top-level ordered list found'] };
+    return { score: 0, reasons: ['no procedural ordered list found'] };
   },
 
   parse(normalizedArticle) {
@@ -344,11 +354,7 @@ const paragraphActionParser = {
   name: 'paragraphActionParser',
 
   _actionRegex() {
-    const escaped = ACTION_VERBS
-      .map(v => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-      .sort((a, b) => b.length - a.length)
-      .join('|');
-    return new RegExp(`^(?:${escaped})\\b`, 'i');
+    return ACTION_VERB_REGEX;
   },
 
   canParse(normalizedArticle) {

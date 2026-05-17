@@ -149,12 +149,14 @@ const JsonKnowledgeImporter = {
             const stepCount = Array.isArray(processed.article.steps) ? processed.article.steps.length : 0;
             stepCountByArticle.push({ title: processed.article.title, parserName, stepCount });
             if (stepCount === 1) {
-              oneStepArticles.push({
-                title: processed.article.title,
-                contentLength: processed.contentLength || 0,
-                chosenParser: parserName,
-                warningReason: (processed.article.parserWarnings || []).join('; ') || 'No additional structure detected'
-              });
+              if (oneStepArticles.length < this.ONE_STEP_TABLE_LIMIT) {
+                oneStepArticles.push({
+                  title: processed.article.title,
+                  contentLength: processed.contentLength || 0,
+                  chosenParser: parserName,
+                  warningReason: (processed.article.parserWarnings || []).join('; ') || 'No additional structure detected'
+                });
+              }
             }
           } else {
             skipped++;
@@ -209,10 +211,7 @@ const JsonKnowledgeImporter = {
     console.log(`[JsonKnowledgeImporter] Articles with 6+ steps: ${stepCountSixPlus}`);
     console.log(`[JsonKnowledgeImporter] Skipped articles: ${skipped}`);
     if (oneStepArticles.length > 0) {
-      console.table(oneStepArticles.slice(0, this.ONE_STEP_TABLE_LIMIT));
-      if (oneStepArticles.length > this.ONE_STEP_TABLE_LIMIT) {
-        console.log(`[JsonKnowledgeImporter] One-step table truncated to first ${this.ONE_STEP_TABLE_LIMIT} rows`);
-      }
+      console.table(oneStepArticles);
     }
 
     const baseMsg = `Imported ${imported} of ${total} articles`;
@@ -416,9 +415,7 @@ const JsonKnowledgeImporter = {
       parserMeta,
       parserName:          parserMeta.parserName || null,
       parserScore:         Number.isFinite(parserMeta.parserScore) ? parserMeta.parserScore : null,
-      parserWarnings:      Array.isArray(parserMeta.parserWarnings)
-        ? parserMeta.parserWarnings
-        : (Array.isArray(parserMeta.parsingWarnings) ? parserMeta.parsingWarnings : []),
+      parserWarnings:      Array.isArray(parserMeta.parsingWarnings) ? parserMeta.parsingWarnings : [],
       parseStatus,
       source:              'bundled_json',
       sourceMeta: {
@@ -603,7 +600,9 @@ const JsonKnowledgeImporter = {
     if (!content) return 'missing';
     if (isHtml) return 'html';
     if (/&lt;\/?[a-z][^&]*&gt;/i.test(content)) return 'escaped_html';
-    if (/^(?:\\s{0,3}(?:[-*+]\\s+|\\d+\\.\\s+)|#{1,6}\\s+)/m.test(content)) return 'markdown';
+    const markdownHeadings = /^#{1,6}\s+\S/m.test(content);
+    const markdownBullets = (content.match(/^\s{0,3}(?:[-*+]\s+|\d+\.\s+)\S+/gm) || []).length >= 2;
+    if (markdownHeadings || markdownBullets) return 'markdown';
     return 'plain_text';
   },
 
