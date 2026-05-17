@@ -17,6 +17,40 @@ const JsonKnowledgeImporter = {
 
   /** Number of articles to parse per microtask yield. */
   BATCH_SIZE: 50,
+  DIAGNOSTIC_RECORD_LIMIT: 3,
+  PREVIEW_MAX_LENGTH: 120,
+
+  BODY_FIELD_CANDIDATES: [
+    'body',
+    'bodyHtml',
+    'body_html',
+    'text',
+    'html',
+    'content',
+    'article',
+    'articleBody',
+    'article_body',
+    'description',
+    'procedure',
+    'instructions',
+    'workInstructions',
+    'work_instructions',
+    'comments',
+    'knowledgeArticle',
+    'knowledge_article'
+  ],
+
+  NESTED_BODY_PATHS: [
+    'fields.text',
+    'fields.body',
+    'fields.description',
+    'article.text',
+    'article.body',
+    'result.text',
+    'result.body',
+    'content.html',
+    'content.text'
+  ],
 
   /**
    * Load knowledge-json/articles.json and import all articles it contains.
@@ -66,6 +100,9 @@ const JsonKnowledgeImporter = {
     const total = records.length;
     let imported = 0;
     let skipped = 0;
+    let articlesWithBody = 0;
+    let articlesMissingBody = 0;
+    const bodyFieldUsage = {};
     const importedAt = new Date().toISOString();
 
     // Process in batches to avoid blocking the UI
@@ -73,11 +110,21 @@ const JsonKnowledgeImporter = {
       const batch = records.slice(start, start + this.BATCH_SIZE);
       const articlesToStore = [];
 
-      for (const raw of batch) {
+      for (let i = 0; i < batch.length; i++) {
+        const raw = batch[i];
         try {
-          const article = this._processRecord(raw, importedAt);
-          if (article) {
-            articlesToStore.push(article);
+          const processed = this._processRecord(raw, importedAt, start + i);
+          if (processed && processed.article) {
+            articlesToStore.push(processed.article);
+            if (processed.hasBody) {
+              articlesWithBody++;
+              if (processed.selectedBodyField) {
+                bodyFieldUsage[processed.selectedBodyField] =
+                  (bodyFieldUsage[processed.selectedBodyField] || 0) + 1;
+              }
+            } else {
+              articlesMissingBody++;
+            }
           } else {
             skipped++;
           }
@@ -101,10 +148,30 @@ const JsonKnowledgeImporter = {
       }
     }
 
-    const msg = skipped > 0
-      ? `Imported ${imported} articles, skipped ${skipped}`
-      : `Imported ${imported} articles`;
-    return { ok: true, imported, skipped, total, message: msg };
+    const mostCommonBodyFields = Object.entries(bodyFieldUsage)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([field, count]) => `${field} (${count})`);
+
+    console.log('[JsonKnowledgeImporter] Import summary');
+    console.log(`[JsonKnowledgeImporter] Total articles found: ${total}`);
+    console.log(`[JsonKnowledgeImporter] Articles with body: ${articlesWithBody}`);
+    console.log(`[JsonKnowledgeImporter] Articles missing body: ${articlesMissingBody}`);
+    console.log(`[JsonKnowledgeImporter] Most common body field names used: ${mostCommonBodyFields.join(', ') || '(none)'}`);
+
+    const baseMsg = `Imported ${imported} of ${total} articles`;
+    const summaryMsg = `with body: ${articlesWithBody}, missing body: ${articlesMissingBody}, most common body fields: ${mostCommonBodyFields.join(', ') || 'none'}`;
+    const skippedMsg = skipped > 0 ? `, skipped ${skipped}` : '';
+    return {
+      ok: true,
+      imported,
+      skipped,
+      total,
+      withBody: articlesWithBody,
+      missingBody: articlesMissingBody,
+      mostCommonBodyFields,
+      message: `${baseMsg} (${summaryMsg})${skippedMsg}`
+    };
   },
 
   /**
@@ -137,8 +204,10 @@ const JsonKnowledgeImporter = {
    * @param {string} importedAt - ISO timestamp for this import run
    * @returns {Object|null} Fully processed article or null if the record should be skipped
    */
-  _processRecord(raw, importedAt) {
+  _processRecord(raw, importedAt, recordIndex = -1) {
     if (!raw || typeof raw !== 'object') return null;
+
+    const availableKeys = Object.keys(raw);
 
     // ── Field mapping ────────────────────────────────────────────────────────
 
@@ -148,23 +217,33 @@ const JsonKnowledgeImporter = {
       raw.number     || raw.kb_number   || null;
 
     // Title
-    const rawTitle =
-      raw.title           || raw.articleTitle       ||
-      raw.short_description || raw.name             ||
-      raw.heading         || '';
+    const titleResult = this._resolveTitle(raw);
+    const rawTitle = titleResult.title;
 
     // Body / content (HTML preferred; plain text accepted)
-    const rawHtml =
-      raw.body        || raw.bodyHtml   || raw.text  ||
-      raw.html        || raw.content    || raw.article ||
-      raw.procedure   || raw.description || '';
+    const bodyResult = this._resolveBody(raw);
 
-    // Plain-text fallback (used only when all HTML fields are empty)
-    const rawText = typeof rawHtml === 'string' ? rawHtml : String(rawHtml || '');
+    if (recordIndex >= 0 && recordIndex < this.DIAGNOSTIC_RECORD_LIMIT) {
+      const bodyCandidates = {};
+      for (const field of this.BODY_FIELD_CANDIDATES) {
+        bodyCandidates[field] = this._previewValue(raw[field]);
+      }
+      console.log('[JsonKnowledgeImporter] JSON article keys', availableKeys);
+      console.log('[JsonKnowledgeImporter] Title field used', titleResult.fieldUsed);
+      console.log('[JsonKnowledgeImporter] Body candidates', bodyCandidates);
+      console.log('[JsonKnowledgeImporter] Candidate body fields found', bodyResult.candidateFieldsFound);
+      console.log('[JsonKnowledgeImporter] Selected body field', bodyResult.selectedField || '(none)');
+      console.log('[JsonKnowledgeImporter] Selected body length', bodyResult.body.length);
+    }
 
     // Summary
     const rawSummary =
-      raw.summary     || raw.description || raw.short_description || '';
+      this._firstNonEmptyString([
+        raw.summary,
+        raw.short_description,
+        this._getByPath(raw, 'metadata.short_description'),
+        raw.description
+      ]) || '';
 
     // Tags
     let rawTags = raw.tags || raw.keywords || raw.sys_tags || [];
@@ -174,7 +253,12 @@ const JsonKnowledgeImporter = {
     const tags = Array.isArray(rawTags) ? rawTags.map(String) : [];
 
     // ── Build HTML for the ingestion pipeline ───────────────────────────────
-    let htmlContent = rawText.trim();
+    const selectedBody = (bodyResult.body || '').trim();
+    const hasBody = Boolean(selectedBody);
+    const rawHtml = hasBody && bodyResult.isHtml ? selectedBody : '';
+    const rawText = hasBody && !bodyResult.isHtml ? selectedBody : '';
+
+    let htmlContent = rawHtml || rawText;
 
     // If the content does not look like HTML, wrap it so the DOM parser works well
     const looksLikeHtml = /<\w[^>]*>/.test(htmlContent);
@@ -192,7 +276,8 @@ const JsonKnowledgeImporter = {
     let parserMeta = {};
     let normalizedArticle = {};
     let resolvedTitle = rawTitle.trim() || 'Untitled article';
-    let titleSource = rawTitle.trim() ? 'title' : 'fallback';
+    let titleSource = rawTitle.trim() ? titleResult.fieldUsed : 'fallback';
+    let parseStatus = 'missing_body';
 
     if (htmlContent) {
       try {
@@ -210,6 +295,10 @@ const JsonKnowledgeImporter = {
         steps            = ingestResult.steps;
         parserMeta       = ingestResult.parserMeta;
         normalizedArticle = ingestResult.normalizedArticle;
+        parseStatus =
+          parserMeta && parserMeta.parserName !== 'fallbackSingleStepParser'
+            ? 'parsed_structured'
+            : 'parsed_fallback';
       } catch (_) {
         // Ingestion failed — fall back to a single raw step
         steps = [{
@@ -218,6 +307,7 @@ const JsonKnowledgeImporter = {
           bodyHtml: `<p>${Articles.escapeHtml(Articles.stripHtmlTags(htmlContent).substring(0, 2000))}</p>`,
           images: []
         }];
+        parseStatus = 'parsed_fallback';
       }
     } else {
       // No content — still create the article if it has a title
@@ -225,9 +315,10 @@ const JsonKnowledgeImporter = {
       steps = [{
         index: 1,
         title: 'Procedure',
-        bodyHtml: '<p>No content provided.</p>',
+        bodyHtml: '<p>No article body was found in the JSON record.</p>',
         images: []
       }];
+      parseStatus = 'missing_body';
     }
 
     // Derive summary
@@ -260,18 +351,209 @@ const JsonKnowledgeImporter = {
       estimatedMinutes:    null,
       steps,
       parserMeta,
+      parseStatus,
       source:              'bundled_json',
       sourceMeta: {
         importedAt,
         originalId:     originalId ? String(originalId) : null,
-        originalNumber: raw.number  || raw.kb_number || null
+        originalNumber: raw.number  || raw.kb_number || null,
+        selectedBodyField: bodyResult.selectedField || null,
+        availableKeys
       },
       createdAt:           importedAt,
       updatedAt:           importedAt
     };
     articleData.searchText = Articles.buildSearchText(articleData);
 
-    return articleData;
+    return {
+      article: articleData,
+      hasBody,
+      selectedBodyField: bodyResult.selectedField
+    };
+  },
+
+  _resolveTitle(raw) {
+    const titleCandidates = [
+      { field: 'title', value: raw.title },
+      { field: 'articleTitle', value: raw.articleTitle },
+      { field: 'short_description', value: raw.short_description },
+      { field: 'name', value: raw.name },
+      { field: 'heading', value: raw.heading },
+      { field: 'metadata.short_description', value: this._getByPath(raw, 'metadata.short_description') }
+    ];
+    for (const candidate of titleCandidates) {
+      const value = this._extractScalarString(candidate.value);
+      if (value) return { title: value, fieldUsed: candidate.field };
+    }
+    return { title: '', fieldUsed: 'fallback' };
+  },
+
+  _resolveBody(raw) {
+    const candidateFieldsFound = [];
+    let selectedField = null;
+    let selected = { body: '', isHtml: false };
+
+    for (const field of this.BODY_FIELD_CANDIDATES) {
+      const valueResult = this._extractContentValue(raw[field], new WeakSet());
+      if (valueResult.body) {
+        candidateFieldsFound.push(field);
+        if (!selectedField) {
+          selectedField = field;
+          selected = valueResult;
+        }
+      }
+    }
+
+    for (const path of this.NESTED_BODY_PATHS) {
+      const valueResult = this._extractContentValue(this._getByPath(raw, path), new WeakSet());
+      if (valueResult.body) {
+        candidateFieldsFound.push(path);
+        if (!selectedField) {
+          selectedField = path;
+          selected = valueResult;
+        }
+      }
+    }
+
+    // Summary fallback: only if no real body candidate exists.
+    if (!selectedField) {
+      const summaryFallbackCandidates = [
+        { field: 'summary', value: raw.summary },
+        { field: 'short_description', value: raw.short_description },
+        { field: 'metadata.short_description', value: this._getByPath(raw, 'metadata.short_description') }
+      ];
+      for (const fallback of summaryFallbackCandidates) {
+        const valueResult = this._extractContentValue(fallback.value, new WeakSet());
+        if (valueResult.body) {
+          selectedField = fallback.field;
+          selected = valueResult;
+          break;
+        }
+      }
+    }
+
+    return {
+      body: selected.body,
+      isHtml: Boolean(selected.isHtml),
+      selectedField,
+      candidateFieldsFound
+    };
+  },
+
+  _extractContentValue(value, seen) {
+    if (value === null || value === undefined) return { body: '', isHtml: false };
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return { body: trimmed, isHtml: /<\w[^>]*>/.test(trimmed) };
+    }
+
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return { body: String(value), isHtml: false };
+    }
+
+    if (Array.isArray(value)) {
+      return this._extractFromArray(value, seen);
+    }
+
+    if (typeof value === 'object') {
+      if (seen.has(value)) return { body: '', isHtml: false };
+      seen.add(value);
+
+      // ServiceNow-like display/value object.
+      const hasValue = Object.prototype.hasOwnProperty.call(value, 'value');
+      const hasDisplayValue = Object.prototype.hasOwnProperty.call(value, 'display_value');
+      if (hasValue || hasDisplayValue) {
+        const valuePart = this._extractContentValue(value.value, seen);
+        const displayPart = this._extractContentValue(value.display_value, seen);
+        const valueLen = this._contentLength(valuePart.body);
+        const displayLen = this._contentLength(displayPart.body);
+        if (valuePart.body && (valuePart.isHtml || valueLen >= displayLen)) {
+          return valuePart;
+        }
+        if (displayPart.body) return displayPart;
+        return valuePart.body ? valuePart : { body: '', isHtml: false };
+      }
+
+      // Common content-block object keys.
+      const objectFieldPriority = this.BODY_FIELD_CANDIDATES;
+      for (const key of objectFieldPriority) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
+          const nested = this._extractContentValue(value[key], seen);
+          if (nested.body) return nested;
+        }
+      }
+
+      return { body: '', isHtml: false };
+    }
+
+    return { body: '', isHtml: false };
+  },
+
+  _extractFromArray(items, seen) {
+    const parts = [];
+    let hasHtml = false;
+
+    for (const item of items) {
+      const extracted = this._extractContentValue(item, seen);
+      if (!extracted.body) continue;
+      parts.push(extracted);
+      if (extracted.isHtml) hasHtml = true;
+    }
+
+    if (parts.length === 0) return { body: '', isHtml: false };
+
+    if (hasHtml) {
+      return {
+        body: parts.map((part) => {
+          if (part.isHtml) return part.body;
+          const escaped = Articles.escapeHtml(part.body);
+          return escaped
+            .split(/\n{2,}/)
+            .map((block) => `<p>${block.replace(/\n/g, '<br>')}</p>`)
+            .join('\n');
+        }).join('\n'),
+        isHtml: true
+      };
+    }
+
+    return {
+      body: parts.map(part => part.body).join('\n\n'),
+      isHtml: false
+    };
+  },
+
+  _extractScalarString(value) {
+    const extracted = this._extractContentValue(value, new WeakSet());
+    return extracted.body || '';
+  },
+
+  _getByPath(obj, path) {
+    return path.split('.').reduce((current, key) => {
+      if (!current || typeof current !== 'object') return undefined;
+      return current[key];
+    }, obj);
+  },
+
+  _firstNonEmptyString(values) {
+    for (const value of values) {
+      const extracted = this._extractScalarString(value);
+      if (extracted) return extracted;
+    }
+    return '';
+  },
+
+  _previewValue(value) {
+    const extracted = this._extractContentValue(value, new WeakSet());
+    if (!extracted.body) return null;
+    return extracted.body.length > this.PREVIEW_MAX_LENGTH
+      ? `${extracted.body.substring(0, this.PREVIEW_MAX_LENGTH)}…`
+      : extracted.body;
+  },
+
+  _contentLength(content) {
+    if (!content) return 0;
+    return Articles.stripHtmlTags(String(content)).trim().length;
   },
 
   /**

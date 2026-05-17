@@ -67,9 +67,10 @@ The importer accepts three shapes:
 | Purpose  | Accepted field names (in priority order) |
 |----------|------------------------------------------|
 | ID       | `id`, `articleId`, `sys_id`, `number`, `kb_number` |
-| Title    | `title`, `articleTitle`, `short_description`, `name`, `heading` |
-| Body     | `body`, `bodyHtml`, `text`, `html`, `content`, `article`, `procedure`, `description` |
-| Summary  | `summary`, `description`, `short_description` |
+| Title    | `title`, `articleTitle`, `short_description`, `name`, `heading`, `metadata.short_description` |
+| Body     | `body`, `bodyHtml`, `body_html`, `text`, `html`, `content`, `article`, `articleBody`, `article_body`, `description`, `procedure`, `instructions`, `workInstructions`, `work_instructions`, `comments`, `knowledgeArticle`, `knowledge_article` |
+| Body (nested) | `fields.text`, `fields.body`, `fields.description`, `article.text`, `article.body`, `result.text`, `result.body`, `content.html`, `content.text` |
+| Summary  | `summary`, `short_description`, `metadata.short_description`, `description` |
 | Tags     | `tags`, `keywords`, `sys_tags` |
 
 ## Notes
@@ -79,3 +80,7 @@ The importer accepts three shapes:
 - Standalone image files are **not** required.
 - Repeated imports upsert existing articles by ID — no duplicates are created.
 - If `articles.json` is missing or invalid, the extension continues to work normally.
+- ServiceNow-like `{ "display_value": "...", "value": "..." }` body objects are supported (prefers `value` when richer).
+- Body arrays are supported and merged in order, preserving HTML blocks where possible.
+- `summary`/`short_description` are used as body only as a final fallback when no body field exists.
+- If no body is found, the article is still imported with `parseStatus = "missing_body"` and a fallback body message.
