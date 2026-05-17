@@ -19,6 +19,7 @@ const JsonKnowledgeImporter = {
   BATCH_SIZE: 50,
   DIAGNOSTIC_RECORD_LIMIT: 3,
   PREVIEW_MAX_LENGTH: 120,
+  ONE_STEP_TABLE_LIMIT: 200,
 
   BODY_FIELD_CANDIDATES: [
     'body',
@@ -103,6 +104,11 @@ const JsonKnowledgeImporter = {
     let articlesWithBody = 0;
     let articlesMissingBody = 0;
     const bodyFieldUsage = {};
+    const bodyCandidateFieldUsage = {};
+    const contentTypeDistribution = {};
+    const parserStrategyDistribution = {};
+    const stepCountByArticle = [];
+    const oneStepArticles = [];
     const importedAt = new Date().toISOString();
 
     // Process in batches to avoid blocking the UI
@@ -122,8 +128,33 @@ const JsonKnowledgeImporter = {
                 bodyFieldUsage[processed.selectedBodyField] =
                   (bodyFieldUsage[processed.selectedBodyField] || 0) + 1;
               }
+              (processed.candidateBodyFields || []).forEach((fieldName) => {
+                bodyCandidateFieldUsage[fieldName] =
+                  (bodyCandidateFieldUsage[fieldName] || 0) + 1;
+              });
+              if (processed.contentType) {
+                contentTypeDistribution[processed.contentType] =
+                  (contentTypeDistribution[processed.contentType] || 0) + 1;
+              }
             } else {
               articlesMissingBody++;
+              contentTypeDistribution.missing =
+                (contentTypeDistribution.missing || 0) + 1;
+            }
+
+            const parserName = processed.article.parserName || 'unknown';
+            parserStrategyDistribution[parserName] =
+              (parserStrategyDistribution[parserName] || 0) + 1;
+
+            const stepCount = Array.isArray(processed.article.steps) ? processed.article.steps.length : 0;
+            stepCountByArticle.push({ title: processed.article.title, parserName, stepCount });
+            if (stepCount === 1) {
+              oneStepArticles.push({
+                title: processed.article.title,
+                contentLength: processed.contentLength || 0,
+                chosenParser: parserName,
+                warningReason: (processed.article.parserWarnings || []).join('; ') || 'No additional structure detected'
+              });
             }
           } else {
             skipped++;
@@ -152,12 +183,37 @@ const JsonKnowledgeImporter = {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([field, count]) => `${field} (${count})`);
+    const detectedContentFieldNames = Object.entries(bodyCandidateFieldUsage)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([field, count]) => `${field} (${count})`);
 
     console.log('[JsonKnowledgeImporter] Import summary');
     console.log(`[JsonKnowledgeImporter] Total articles found: ${total}`);
     console.log(`[JsonKnowledgeImporter] Articles with body: ${articlesWithBody}`);
     console.log(`[JsonKnowledgeImporter] Articles missing body: ${articlesMissingBody}`);
     console.log(`[JsonKnowledgeImporter] Most common body field names used: ${mostCommonBodyFields.join(', ') || '(none)'}`);
+    console.log(`[JsonKnowledgeImporter] Detected content field names: ${detectedContentFieldNames.join(', ') || '(none)'}`);
+    console.log('[JsonKnowledgeImporter] Content type distribution:', contentTypeDistribution);
+    console.log('[JsonKnowledgeImporter] Parser strategy distribution:', parserStrategyDistribution);
+
+    const avgStepCount = stepCountByArticle.length > 0
+      ? stepCountByArticle.reduce((sum, a) => sum + a.stepCount, 0) / stepCountByArticle.length
+      : 0;
+    const stepCountOne = stepCountByArticle.filter(a => a.stepCount === 1).length;
+    const stepCountTwoToFive = stepCountByArticle.filter(a => a.stepCount >= 2 && a.stepCount <= 5).length;
+    const stepCountSixPlus = stepCountByArticle.filter(a => a.stepCount >= 6).length;
+    console.log(`[JsonKnowledgeImporter] Average step count: ${avgStepCount.toFixed(2)}`);
+    console.log(`[JsonKnowledgeImporter] Articles with 1 step: ${stepCountOne}`);
+    console.log(`[JsonKnowledgeImporter] Articles with 2–5 steps: ${stepCountTwoToFive}`);
+    console.log(`[JsonKnowledgeImporter] Articles with 6+ steps: ${stepCountSixPlus}`);
+    console.log(`[JsonKnowledgeImporter] Skipped articles: ${skipped}`);
+    if (oneStepArticles.length > 0) {
+      console.table(oneStepArticles.slice(0, this.ONE_STEP_TABLE_LIMIT));
+      if (oneStepArticles.length > this.ONE_STEP_TABLE_LIMIT) {
+        console.log(`[JsonKnowledgeImporter] One-step table truncated to first ${this.ONE_STEP_TABLE_LIMIT} rows`);
+      }
+    }
 
     const baseMsg = `Imported ${imported} of ${total} articles`;
     const summaryMsg = `with body: ${articlesWithBody}, missing body: ${articlesMissingBody}, most common body fields: ${mostCommonBodyFields.join(', ') || 'none'}`;
@@ -170,6 +226,13 @@ const JsonKnowledgeImporter = {
       withBody: articlesWithBody,
       missingBody: articlesMissingBody,
       mostCommonBodyFields,
+      detectedContentFieldNames,
+      contentTypeDistribution,
+      parserStrategyDistribution,
+      averageStepCount: Number(avgStepCount.toFixed(2)),
+      articlesWithOneStep: stepCountOne,
+      articlesWithTwoToFiveSteps: stepCountTwoToFive,
+      articlesWithSixPlusSteps: stepCountSixPlus,
       message: `${baseMsg} (${summaryMsg})${skippedMsg}`
     };
   },
@@ -351,6 +414,11 @@ const JsonKnowledgeImporter = {
       estimatedMinutes:    null,
       steps,
       parserMeta,
+      parserName:          parserMeta.parserName || null,
+      parserScore:         Number.isFinite(parserMeta.parserScore) ? parserMeta.parserScore : null,
+      parserWarnings:      Array.isArray(parserMeta.parserWarnings)
+        ? parserMeta.parserWarnings
+        : (Array.isArray(parserMeta.parsingWarnings) ? parserMeta.parsingWarnings : []),
       parseStatus,
       source:              'bundled_json',
       sourceMeta: {
@@ -368,7 +436,10 @@ const JsonKnowledgeImporter = {
     return {
       article: articleData,
       hasBody,
-      selectedBodyField: bodyResult.selectedField
+      selectedBodyField: bodyResult.selectedField,
+      contentType: bodyResult.contentType || (hasBody ? (bodyResult.isHtml ? 'html' : 'plain_text') : 'missing'),
+      contentLength: this._contentLength(selectedBody),
+      candidateBodyFields: bodyResult.candidateFieldsFound
     };
   },
 
@@ -391,7 +462,7 @@ const JsonKnowledgeImporter = {
   _resolveBody(raw) {
     const candidateFieldsFound = [];
     let selectedField = null;
-    let selected = { body: '', isHtml: false };
+    let selected = { body: '', isHtml: false, contentType: 'missing' };
 
     for (const field of this.BODY_FIELD_CANDIDATES) {
       const valueResult = this._extractContentValue(raw[field], new WeakSet());
@@ -427,6 +498,7 @@ const JsonKnowledgeImporter = {
         if (valueResult.body) {
           selectedField = fallback.field;
           selected = valueResult;
+          candidateFieldsFound.push(fallback.field);
           break;
         }
       }
@@ -435,21 +507,23 @@ const JsonKnowledgeImporter = {
     return {
       body: selected.body,
       isHtml: Boolean(selected.isHtml),
+      contentType: selected.contentType || (selected.isHtml ? 'html' : 'plain_text'),
       selectedField,
       candidateFieldsFound
     };
   },
 
   _extractContentValue(value, seen) {
-    if (value === null || value === undefined) return { body: '', isHtml: false };
+    if (value === null || value === undefined) return { body: '', isHtml: false, contentType: 'missing' };
 
     if (typeof value === 'string') {
       const trimmed = value.trim();
-      return { body: trimmed, isHtml: /<\w[^>]*>/.test(trimmed) };
+      const isHtml = /<\w[^>]*>/.test(trimmed);
+      return { body: trimmed, isHtml, contentType: this._detectStringContentType(trimmed, isHtml) };
     }
 
     if (typeof value === 'number' || typeof value === 'boolean') {
-      return { body: String(value), isHtml: false };
+      return { body: String(value), isHtml: false, contentType: 'plain_text' };
     }
 
     if (Array.isArray(value)) {
@@ -457,7 +531,7 @@ const JsonKnowledgeImporter = {
     }
 
     if (typeof value === 'object') {
-      if (seen.has(value)) return { body: '', isHtml: false };
+      if (seen.has(value)) return { body: '', isHtml: false, contentType: 'missing' };
       seen.add(value);
 
       // ServiceNow-like display/value object.
@@ -472,7 +546,7 @@ const JsonKnowledgeImporter = {
           return valuePart;
         }
         if (displayPart.body) return displayPart;
-        return valuePart.body ? valuePart : { body: '', isHtml: false };
+        return valuePart.body ? valuePart : { body: '', isHtml: false, contentType: 'missing' };
       }
 
       // Common content-block object keys.
@@ -484,10 +558,10 @@ const JsonKnowledgeImporter = {
         }
       }
 
-      return { body: '', isHtml: false };
+      return { body: '', isHtml: false, contentType: 'structured_object' };
     }
 
-    return { body: '', isHtml: false };
+    return { body: '', isHtml: false, contentType: 'missing' };
   },
 
   _extractFromArray(items, seen) {
@@ -501,7 +575,7 @@ const JsonKnowledgeImporter = {
       if (extracted.isHtml) hasHtml = true;
     }
 
-    if (parts.length === 0) return { body: '', isHtml: false };
+    if (parts.length === 0) return { body: '', isHtml: false, contentType: 'structured_array' };
 
     if (hasHtml) {
       return {
@@ -513,14 +587,24 @@ const JsonKnowledgeImporter = {
             .map((block) => `<p>${block.replace(/\n/g, '<br>')}</p>`)
             .join('\n');
         }).join('\n'),
-        isHtml: true
+        isHtml: true,
+        contentType: 'structured_array_html'
       };
     }
 
     return {
       body: parts.map(part => part.body).join('\n\n'),
-      isHtml: false
+      isHtml: false,
+      contentType: 'structured_array'
     };
+  },
+
+  _detectStringContentType(content, isHtml) {
+    if (!content) return 'missing';
+    if (isHtml) return 'html';
+    if (/&lt;\/?[a-z][^&]*&gt;/i.test(content)) return 'escaped_html';
+    if (/^(?:\\s{0,3}(?:[-*+]\\s+|\\d+\\.\\s+)|#{1,6}\\s+)/m.test(content)) return 'markdown';
+    return 'plain_text';
   },
 
   _extractScalarString(value) {
